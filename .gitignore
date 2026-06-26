@@ -1,0 +1,9 @@
+# VSCode
+.vscode/
+
+# macOS
+.DS_Store
+*.DS_Store
+
+# TradingView backups
+*.bak
