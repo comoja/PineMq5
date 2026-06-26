@@ -1,0 +1,131 @@
+//@version=6
+strategy('Sniper Master', overlay = true, initial_capital = 500, default_qty_type = strategy.percent_of_equity, default_qty_value = 5)
+
+// --- PARÁMETROS E INTERRUPTORES ---
+riesgo_perc = input.float(5.0, "Riesgo por operación (%)")
+minRR       = input.float(1.8, "Ratio R:R Mínimo")
+show_sar    = input.bool(true, "Mostrar SL Trail SAR (Rojo)")
+show_simple = input.bool(true, "Mostrar SL Trail Simple (Guinda)")
+
+// --- PARÁMETROS DE PINECONNECTOR ---
+use_pc         = input.bool(true, "Enviar alertas a PineConnector", group="PineConnector")
+pc_license_id  = input.string("9093998805205", "PineConnector License ID", group="PineConnector")
+pc_symbol      = input.string("", "Símbolo en MT5 (Vacío = Default)", group="PineConnector")
+
+// --- DETECCIÓN DE INSTRUMENTO Y TF ---
+isSilver = str.contains(str.upper(syminfo.ticker), "XAG")    or str.contains(str.upper(syminfo.ticker), "SILVER")
+isGold   = str.contains(str.upper(syminfo.ticker), "XAU")    or str.contains(str.upper(syminfo.ticker), "GOLD")
+isCrypto = syminfo.type == "crypto"
+targetTF = isCrypto ? "60" : isSilver or isGold ? "30" : "15"
+bool tf_ok = timeframe.period == targetTF  // informativo — ya NO bloquea entradas
+
+// --- INDICADORES ---
+emaVal = ta.ema(close, isCrypto ? 100 : 200)
+[macdL, macdS, _] = ta.macd(close, 12, 26, 9)
+sarVal = ta.sar(0.02, 0.02, 0.2)
+atr    = ta.atr(14)
+
+// --- VARIABLES PERSISTENTES ---
+var float sl_sar    = na
+var float sl_simple = na
+var float tp_fijo   = na
+var float sl_ini    = na
+var float pnl_hoy   = 0.0
+var int last_id     = 0
+
+if ta.change(time("D")) != 0
+    pnl_hoy := 0.0
+
+// --- LÓGICA DE ENTRADA ---
+// tf_ok es solo INFORMATIVO (tabla muestra advertencia si TF no es el ideal)
+// Las entradas se disparan en cualquier TF para no perder señales
+longC  = ta.crossover(macdL, macdS) and close > emaVal
+shortC = ta.crossunder(macdL, macdS) and close < emaVal
+float qty = (strategy.equity * (riesgo_perc / 100)) / close
+
+if strategy.position_size == 0
+    if longC
+        sl_ini := low - (atr * 2)
+        sl_sar := sl_ini
+        sl_simple := sl_ini
+        tp_fijo := close + (close - sl_ini) * minRR
+        strategy.entry("Long", strategy.long, qty = qty)
+    if shortC
+        sl_ini := high + (atr * 2)
+        sl_sar := sl_ini
+        sl_simple := sl_ini
+        tp_fijo := close - (sl_ini - close) * minRR
+        strategy.entry("Short", strategy.short, qty = qty)
+
+// --- DIBUJO DE ETIQUETAS AL CAMBIAR POSICIÓN ---
+if ta.change(strategy.position_size) != 0 and strategy.position_size != 0
+    esLong = strategy.position_size > 0
+    label.new(bar_index, tp_fijo, "TP " + str.tostring(tp_fijo, format.mintick), color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)
+    label.new(bar_index, sl_ini, "SL " + str.tostring(sl_ini, format.mintick), color=color.maroon, textcolor=color.white, style=label.style_label_left, size=size.small)
+    label.new(bar_index, esLong ? low : high, (esLong ? "COMPRA" : "VENTA") + "\n" + str.tostring(math.abs(strategy.position_size), "#.###"), color=esLong?color.green:color.red, textcolor=color.white, style=esLong?label.style_label_up:label.style_label_down, yloc=esLong?yloc.belowbar:yloc.abovebar, size=size.small)
+    line.new(bar_index, close, bar_index, tp_fijo, color=color.new(color.green, 50), style=line.style_dashed)
+    line.new(bar_index, close, bar_index, sl_ini, color=color.new(color.red, 50), style=line.style_dashed)
+
+// --- TRAILING Y SALIDA ---
+if strategy.position_size != 0
+    if strategy.position_size > 0
+        if sarVal > sl_sar and sarVal < close
+            sl_sar := sarVal
+        if low - (atr * 1.5) > sl_simple
+            sl_simple := low - (atr * 1.5)
+    else
+        if sarVal < sl_sar and sarVal > close
+            sl_sar := sarVal
+        if high + (atr * 1.5) < sl_simple
+            sl_simple := high + (atr * 1.5)
+    strategy.exit("Exit", stop = sl_sar, limit = tp_fijo)
+
+if strategy.closedtrades > last_id
+    trade_pnl = strategy.closedtrades.profit(strategy.closedtrades - 1)
+    pnl_hoy += trade_pnl
+    label.new(bar_index, high, "PNL: " + (trade_pnl >= 0 ? "+" : "") + str.tostring(trade_pnl, "#.##"), color=trade_pnl >= 0 ? color.green : color.red, textcolor=color.white, style=label.style_label_down, yloc=yloc.abovebar, size=size.small)
+    last_id := strategy.closedtrades
+
+// --- DIBUJADO DINÁMICO ---
+inTrade = strategy.position_size != 0
+plot(inTrade and show_sar ? sl_sar : na, "SL SAR", color=color.red, linewidth=3, style=plot.style_linebr)
+plot(inTrade and show_simple ? sl_simple : na, "SL Simple", color=color.rgb(128, 0, 0), linewidth=2, style=plot.style_circles)
+plot(inTrade ? tp_fijo : na, "TP", color=color.green, linewidth=1, style=plot.style_circles)
+
+// --- TABLA DE CONTROL (SIN VAR PARA VISIBILIDAD) ---
+main_table = table.new(position.top_right, 2, 6, bgcolor=color.new(color.black, 0), border_width=1, border_color=color.gray)
+if barstate.islast
+    tf_color = tf_ok ? color.green : color.red
+    table.cell(main_table, 0, 0, "Activo:", text_color=color.white)
+    table.cell(main_table, 1, 0, syminfo.ticker, text_color=color.yellow)
+    table.cell(main_table, 0, 1, "TF Ideal:", text_color=color.white)
+    table.cell(main_table, 1, 1, targetTF + " min", text_color=tf_color)
+    table.cell(main_table, 0, 2, "Capital:", text_color=color.white)
+    table.cell(main_table, 1, 2, "$" + str.tostring(strategy.equity, "#.##"), text_color=color.green)
+    table.cell(main_table, 0, 3, "PnL Hoy:", text_color=color.white)
+    table.cell(main_table, 1, 3, (pnl_hoy >= 0 ? "+" : "") + str.tostring(pnl_hoy, "#.##"), text_color=pnl_hoy >= 0 ? color.green : color.red)
+    table.cell(main_table, 0, 4, "Status:", text_color=color.white)
+    table.cell(main_table, 1, 4, tf_ok ? "ACTIVO" : "TF INCORRECTO", text_color=tf_color)
+
+plot(sarVal, "SAR", style=plot.style_cross, color=color.new(color.blue, 60))
+plot(emaVal, "EMA", color=color.new(color.purple, 85))
+
+// --- ALERTAS DE PINECONNECTOR ---
+var float prev_pos = 0.0
+if use_pc and strategy.position_size != prev_pos
+    symbol_to_send = pc_symbol == "" ? syminfo.ticker : pc_symbol
+    if strategy.position_size > 0 and prev_pos <= 0
+        alert_msg = pc_license_id + ",buy," + symbol_to_send + ",risk=" + str.tostring(riesgo_perc) + ",sl_price=" + str.tostring(sl_ini) + ",tp_price=" + str.tostring(tp_fijo)
+        alert(alert_msg, alert.freq_once_per_bar)
+    else if strategy.position_size < 0 and prev_pos >= 0
+        alert_msg = pc_license_id + ",sell," + symbol_to_send + ",risk=" + str.tostring(riesgo_perc) + ",sl_price=" + str.tostring(sl_ini) + ",tp_price=" + str.tostring(tp_fijo)
+        alert(alert_msg, alert.freq_once_per_bar)
+    else if strategy.position_size == 0
+        if prev_pos > 0
+            alert_msg = pc_license_id + ",closelong," + symbol_to_send
+            alert(alert_msg, alert.freq_once_per_bar)
+        else if prev_pos < 0
+            alert_msg = pc_license_id + ",closeshort," + symbol_to_send
+            alert(alert_msg, alert.freq_once_per_bar)
+    prev_pos := strategy.position_size
+

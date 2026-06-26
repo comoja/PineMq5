@@ -1,0 +1,196 @@
+//@version=6
+strategy("HA_EMA Strategy", overlay=true, initial_capital=450, default_qty_type=strategy.percent_of_equity, default_qty_value=10, commission_type=strategy.commission.percent, commission_value=0.04)
+
+//+------------------------------------------------------------------+
+//|                                                     HA_EMA.pine  |
+//|                                  Estrategia Heikin-Ashi + EMA    |
+//|                                   Con Trailing Stop              |
+//+------------------------------------------------------------------+
+
+// --- INPUTS DE RIESGO Y CONTROL ---
+gp_risk    = "--- GESTIÓN DE RIESGO ---"
+risk_perc  = input.float(1.0, "Riesgo por operación (%)", minval=0.1, maxval=10.0, group=gp_risk, tooltip="Porcentaje de la equidad a arriesgar basado en la distancia del SL inicial")
+use_tp     = input.bool(true, "Usar Take Profit Fijo", group=gp_risk)
+rr_ratio   = input.float(2.5, "Relación Riesgo / Recompensa (R:R)", minval=0.5, group=gp_risk)
+
+// --- INPUTS DE INDICADORES ---
+gp_ind      = "--- CONFIGURACIÓN DE INDICADORES ---"
+ema_fast_len = input.int(9, "Período EMA Rápida (Verde)", minval=1, group=gp_ind)
+ema_slow_len = input.int(21, "Período EMA Lenta (Roja)", minval=1, group=gp_ind)
+swing_period = input.int(5, "Velas para Swing High/Low de SL", minval=2, group=gp_ind)
+sl_buffer_pts = input.float(0.0, "Buffer para el SL (Ticks/Puntos)", minval=0.0, group=gp_ind)
+
+// --- INPUTS FILTRO DE RANGO (iMACD) ---
+gp_flt       = "--- FILTRO DE RANGO (iMACD) ---"
+use_imacd    = input.bool(true, "Usar Filtro Impulse MACD", group=gp_flt)
+imacd_len    = input.int(35, "Período Impulse MACD", minval=1, group=gp_flt)
+
+// --- INPUTS FILTROS DE OPTIMIZACIÓN ---
+gp_opt       = "--- FILTROS DE OPTIMIZACIÓN ---"
+use_ema200   = input.bool(true, "Usar Filtro EMA 200 Macro", group=gp_opt)
+ema200_len   = input.int(200, "Período EMA Macro", minval=1, group=gp_opt)
+use_ha_strength = input.bool(true, "Usar Filtro Fuerza HA (Sin Mechas)", group=gp_opt)
+
+// --- CÁLCULO DE VELAS HEIKIN-ASHI RECURSIVO NATIVO ---
+var float haOpen = na
+haClose = (open + high + low + close) / 4
+haOpen := na(haOpen[1]) ? (open + close) / 2 : (haOpen[1] + haClose[1]) / 2
+haHigh = math.max(high, math.max(haOpen, haClose))
+haLow = math.min(low, math.min(haOpen, haClose))
+
+ha_green = haClose > haOpen
+ha_red   = haClose < haOpen
+
+// --- DIBUJADO DE LAS VELAS HA (OPCIONAL EN EL FONDO) ---
+// Se dibujan barras semi-transparentes para referencia visual sin alterar el gráfico base
+plotcandle(haOpen, haHigh, haLow, haClose, title="Velas Heikin-Ashi Internas", color=ha_green ? color.new(color.green, 85) : color.new(color.red, 85), wickcolor=ha_green ? color.new(color.green, 80) : color.new(color.red, 80), bordercolor=na)
+
+// --- CÁLCULO DE MEDIAS MÓVILES ---
+ema_fast = ta.ema(close, ema_fast_len)
+ema_slow = ta.ema(close, ema_slow_len)
+ema_200  = ta.ema(close, ema200_len)
+
+plot(ema_fast, "EMA Rápida", color=color.green, linewidth=2)
+plot(ema_slow, "EMA Lenta", color=color.red, linewidth=2)
+plot(use_ema200 ? ema_200 : na, "EMA Macro", color=color.new(color.blue, 30), linewidth=1, linestyle=plot.linestyle_dashed)
+
+// --- FUNCIONES AUXILIARES IMPULSE MACD ---
+calc_zlema(src, length) =>
+    ema1 = ta.ema(src, length)
+    ema2 = ta.ema(ema1, length)
+    d = ema1 - ema2
+    ema1 + d
+
+// --- CÁLCULO DE IMPULSE MACD ---
+imacd_src = hlc3
+hi = ta.rma(high, imacd_len)
+lo = ta.rma(low, imacd_len)
+mi = calc_zlema(imacd_src, imacd_len)
+md = mi > hi ? mi - hi : mi < lo ? mi - lo : 0.0
+
+// --- LÓGICA DE ALINEACIÓN Y GATILLOS ---
+// Evaluamos al cierre de la vela actual (bar 0) para ejecutar en la apertura de la siguiente
+imacd_long_ok  = not use_imacd or (md > 0.0)
+imacd_short_ok = not use_imacd or (md < 0.0)
+
+// Filtro EMA 200
+ema200_long_ok  = not use_ema200 or (close > ema_200)
+ema200_short_ok = not use_ema200 or (close < ema_200)
+
+// Filtro Fuerza Heikin-Ashi (Sin mechas inferiores para compra, sin mechas superiores para venta)
+ha_strength_long  = not use_ha_strength or (haLow == haOpen)
+ha_strength_short = not use_ha_strength or (haHigh == haOpen)
+
+is_long_aligned  = (ema_fast > ema_slow) and ha_green and imacd_long_ok and ema200_long_ok and ha_strength_long
+is_short_aligned = (ema_fast < ema_slow) and ha_red and imacd_short_ok and ema200_short_ok and ha_strength_short
+
+trigger_long  = is_long_aligned and not is_long_aligned[1]
+trigger_short = is_short_aligned and not is_short_aligned[1]
+
+// --- CÁLCULO DE STOP LOSS DINÁMICO POR SWINGS ---
+lowest_low   = ta.lowest(low, swing_period)
+highest_high = ta.highest(high, swing_period)
+sl_buffer    = sl_buffer_pts * syminfo.mintick
+
+var float pending_sl = na
+var float pending_tp = na
+
+if trigger_long
+    pending_sl := lowest_low - sl_buffer
+    // Forzar al menos 1 tick de riesgo mínimo para evitar divisiones por cero
+    if (close - pending_sl) <= 0
+        pending_sl := close - syminfo.mintick
+    risk = close - pending_sl
+    pending_tp := use_tp ? (close + risk * rr_ratio) : na
+
+if trigger_short
+    pending_sl := highest_high + sl_buffer
+    if (pending_sl - close) <= 0
+        pending_sl := close + syminfo.mintick
+    risk = pending_sl - close
+    pending_tp := use_tp ? (close - risk * rr_ratio) : na
+
+// --- VARIABLES PERSISTENTES PARA EL TRAILING POR TERCIOS ---
+var float active_sl  = na
+var float active_tp  = na
+var float trail_step = na
+var float entry_p    = na
+
+// --- CÁLCULO DE LOTAJE DINÁMICO ---
+risk_amount = strategy.equity * (risk_perc / 100.0)
+risk_dist   = math.abs(close - pending_sl)
+qty         = risk_amount / (risk_dist * syminfo.pointvalue)
+
+// --- EJECUCIÓN DE ENTRADAS ---
+if trigger_long and strategy.position_size == 0
+    strategy.entry("Long", strategy.long, qty=qty)
+
+if trigger_short and strategy.position_size == 0
+    strategy.entry("Short", strategy.short, qty=qty)
+
+// --- DETECCIÓN DE APERTURA DE OPERACIÓN ---
+pos_opened = ta.change(strategy.position_size) != 0 and strategy.position_size != 0
+
+if pos_opened
+    entry_p    := strategy.position_avg_price
+    active_sl  := pending_sl
+    active_tp  := pending_tp
+    trail_step := math.abs(entry_p - active_sl) / 3.0
+
+// --- GESTIÓN DEL TRAILING STOP POR TERCIOS (1/3 del riesgo inicial) ---
+if strategy.position_size > 0
+    recorrido = high - entry_p
+    niveles = math.floor(recorrido / trail_step)
+    if niveles > 0
+        initial_sl = entry_p - (trail_step * 3.0)
+        nuevo_sl = initial_sl + (trail_step * niveles)
+        if nuevo_sl > active_sl
+            active_sl := nuevo_sl
+
+else if strategy.position_size < 0
+    recorrido = entry_p - low
+    niveles = math.floor(recorrido / trail_step)
+    if niveles > 0
+        initial_sl = entry_p + (trail_step * 3.0)
+        nuevo_sl = initial_sl - (trail_step * niveles)
+        if nuevo_sl < active_sl or na(active_sl)
+            active_sl := nuevo_sl
+
+// --- RESETEO DE VARIABLES AL CERRAR ---
+if strategy.position_size == 0
+    active_sl  := na
+    active_tp  := na
+    trail_step := na
+    entry_p    := na
+
+// --- EJECUCIÓN DE SALIDAS ---
+if strategy.position_size != 0
+    strategy.exit("Exit", stop=active_sl, limit=active_tp)
+
+// --- PLOTS DE NIVELES EN EL GRÁFICO ---
+plot(strategy.position_size != 0 ? active_sl : na, "Nivel Stop Loss", color=color.red, style=plot.style_linebr, linewidth=2)
+plot(strategy.position_size != 0 and use_tp ? active_tp : na, "Nivel Take Profit", color=color.green, style=plot.style_linebr, linewidth=2)
+
+// --- TABLA DE ESTADÍSTICAS Y CONTROL ---
+var table main_table = table.new(position.top_right, 2, 6, bgcolor=color.new(color.black, 15), border_width=1, border_color=color.gray)
+if barstate.islast
+    in_trade = strategy.position_size != 0
+    table.cell(main_table, 0, 0, "Estrategia:", text_color=color.white, text_size=size.small)
+    table.cell(main_table, 1, 0, "HA_EMA (TV)", text_color=color.yellow, text_size=size.small)
+    
+    table.cell(main_table, 0, 1, "Estado:", text_color=color.white, text_size=size.small)
+    table.cell(main_table, 1, 1, in_trade ? "DENTRO" : "BUSCANDO", text_color=in_trade ? color.green : color.yellow, text_size=size.small)
+    
+    table.cell(main_table, 0, 2, "Equidad:", text_color=color.white, text_size=size.small)
+    table.cell(main_table, 1, 2, "$" + str.tostring(strategy.equity, "#.##"), text_color=color.green, text_size=size.small)
+    
+    table.cell(main_table, 0, 3, "Paso Trail:", text_color=color.white, text_size=size.small)
+    table.cell(main_table, 1, 3, in_trade ? str.tostring(trail_step, "#.####") : "-", text_color=color.white, text_size=size.small)
+    
+    table.cell(main_table, 0, 4, "Filtro iMACD:", text_color=color.white, text_size=size.small)
+    imacd_status = not use_imacd ? "DESACTIVADO" : md == 0.0 ? "RANGO" : md > 0.0 ? "ALCISTA" : "BAJISTA"
+    imacd_color  = not use_imacd ? color.gray : md == 0.0 ? color.orange : md > 0.0 ? color.green : color.red
+    table.cell(main_table, 1, 4, imacd_status, text_color=imacd_color, text_size=size.small)
+    
+    table.cell(main_table, 0, 5, "Rendimiento:", text_color=color.white, text_size=size.small)
+    table.cell(main_table, 1, 5, str.tostring(strategy.netprofit, "#.##") + " USD", text_color=strategy.netprofit >= 0 ? color.green : color.red, text_size=size.small)

@@ -1,0 +1,185 @@
+//@version=6
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║  BreakoutNY 15min  –  ARCHIVO MASTER (Pine Script)              ║
+// ║  Al replicar a MQ5, preservar TODAS las secciones [MQ5-CRITICAL]║
+// ╠══════════════════════════════════════════════════════════════════╣
+// ║  CHECKLIST DE TRADUCCIÓN A MQ5:                                 ║
+// ║  [✓] 1. GetOwnPositionType() devuelve -1 / BUY / SELL           ║
+// ║  [✓] 2. longC  bloquea si ya hay SHORT  (not in_short)          ║
+// ║  [✓] 3. shortC bloquea si ya hay LONG   (not in_long)           ║
+// ║  [✓] 4. Trailing por tercios (trail = t_risk / 3)               ║
+// ║  [✓] 5. Filtro magic_number en TODAS las consultas              ║
+// ╚══════════════════════════════════════════════════════════════════╝
+strategy('BreakoutNY 15min', overlay=true,
+         initial_capital=10000,
+         default_qty_type=strategy.percent_of_equity,
+         default_qty_value=2,
+         process_orders_on_close=true)
+
+// ─────────────────────────────────────────────
+// INPUTS
+// ─────────────────────────────────────────────
+input group "--- CONFIGURACIÓN GENERAL ---"
+float rr         = input.float(0.90, "RR para TP", minval=0.1, step=0.1)
+int   max_trades = input.int(3,    "Máx trades por día", minval=1, maxval=10)
+
+input group "--- HORARIO DEL RANGO (hora del broker) ---"
+int start_hour   = input.int(16, "Hora inicio",   minval=0, maxval=23)
+int start_min_i  = input.int(30, "Minuto inicio", minval=0, maxval=59)
+int end_hour     = input.int(16, "Hora fin",      minval=0, maxval=23)
+int end_min_i    = input.int(45, "Minuto fin",    minval=0, maxval=59)
+
+// ─────────────────────────────────────────────
+// INDICADORES
+// ─────────────────────────────────────────────
+float ema200 = ta.ema(close, 200)
+plot(ema200, "EMA 200", color=color.new(color.blue, 30), linewidth=2)
+
+// ─────────────────────────────────────────────
+// VARIABLES
+// ─────────────────────────────────────────────
+var float r_high       = na   // techo del rango
+var float r_low        = na   // piso del rango
+var float t_ent        = na   // precio de entrada
+var float t_sl         = na   // SL activo (trail)
+var float t_tp         = na   // TP
+var float t_risk       = na   // riesgo inicial (dist entrada-SL)
+var int   trades_today = 0    // conteo de trades del día
+var int   last_day_id  = 0    // ID único del día actual
+
+// ─────────────────────────────────────────────
+// RESETEO DIARIO
+// ─────────────────────────────────────────────
+int current_day_id = year * 10000 + month * 100 + dayofmonth
+bool is_new_day = current_day_id != last_day_id
+
+if is_new_day
+    r_high        := na
+    r_low         := na
+    trades_today  := 0
+    last_day_id   := current_day_id
+
+// ─────────────────────────────────────────────
+// CONSTRUCCIÓN DEL RANGO
+// ─────────────────────────────────────────────
+int bar_mins   = hour * 60 + minute
+int start_mins = start_hour * 60 + start_min_i
+int end_mins   = end_hour   * 60 + end_min_i
+bool in_session = bar_mins >= start_mins and bar_mins < end_mins
+
+if in_session
+    r_high := na(r_high) ? high : math.max(r_high, high)
+    r_low  := na(r_low)  ? low  : math.min(r_low,  low)
+
+// ─────────────────────────────────────────────
+// CONDICIONES DE ENTRADA
+// ─────────────────────────────────────────────
+bool after_session = not in_session and not na(r_high) and not na(r_low)
+
+bool body_up = close > r_high
+bool body_dn = close < r_low
+
+// ─────────────────────────────────────────────
+// [MQ5-CRITICAL #1] DETECCIÓN DE DIRECCIÓN DE POSICIÓN
+// MQ5: reemplazar con GetOwnPositionType() → -1 / POSITION_TYPE_BUY / POSITION_TYPE_SELL
+// strategy.position_size > 0  → LONG abierto   (MQ5: pos_type == POSITION_TYPE_BUY)
+// strategy.position_size < 0  → SHORT abierto  (MQ5: pos_type == POSITION_TYPE_SELL)
+// strategy.position_size == 0 → sin posición   (MQ5: pos_type == -1)
+// ─────────────────────────────────────────────
+bool in_long  = strategy.position_size > 0
+bool in_short = strategy.position_size < 0
+bool flat     = strategy.position_size == 0
+
+// [MQ5-CRITICAL #2] FILTRO DE POSICIÓN CONTRARIA EN CONDICIONES DE ENTRADA
+// MQ5: try_long  = body_up && ema_ok && pos_type != POSITION_TYPE_SELL
+// MQ5: try_short = body_dn && ema_ok && pos_type != POSITION_TYPE_BUY
+bool longC  = after_session and body_up and close > ema200
+              and not in_short and trades_today < max_trades
+
+bool shortC = after_session and body_dn and close < ema200
+              and not in_long  and trades_today < max_trades
+
+// ─────────────────────────────────────────────
+// ENTRADAS
+// ─────────────────────────────────────────────
+if longC
+    t_ent        := close
+    t_sl         := r_low
+    t_risk       := math.abs(close - r_low)
+    t_tp         := close + t_risk * rr
+    trades_today += 1
+    strategy.entry("L", strategy.long)
+    label.new(bar_index, low, "↑ LONG", color=color.green,
+              textcolor=color.white, style=label.style_label_up, size=size.small)
+    box.new(bar_index, t_tp, bar_index + 20, close,
+            bgcolor=color.new(color.green, 75), border_color=color.new(color.green, 40))
+    box.new(bar_index, close, bar_index + 20, t_sl,
+            bgcolor=color.new(color.red, 75), border_color=color.new(color.red, 40))
+
+if shortC
+    t_ent        := close
+    t_sl         := r_high
+    t_risk       := math.abs(close - r_high)
+    t_tp         := close - t_risk * rr
+    trades_today += 1
+    strategy.entry("S", strategy.short)
+    label.new(bar_index, high, "↓ SHORT", color=color.red,
+              textcolor=color.white, style=label.style_label_down, size=size.small)
+    box.new(bar_index, close, bar_index + 20, t_tp,
+            bgcolor=color.new(color.green, 75), border_color=color.new(color.green, 40))
+    box.new(bar_index, t_sl, bar_index + 20, close,
+            bgcolor=color.new(color.red, 75), border_color=color.new(color.red, 40))
+
+// ─────────────────────────────────────────────
+// TRAILING STOP POR TERCIOS
+// SL sube 1/3 por cada 1/3 de avance
+// Llega a BE (entry) cuando precio alcanza +1R
+// ─────────────────────────────────────────────
+// [MQ5-CRITICAL #3] TRAILING STOP POR TERCIOS
+// MQ5: trail_step = dist_puntos / 3.0  (calculado al abrir la posición)
+// MQ5: nuevo_sl se calcula con (t_ent ± trail_step*3) ∓ trail_step*niveles
+if strategy.position_size != 0 and not na(t_risk)
+    float trail = t_risk / 3.0
+
+    if strategy.position_size > 0
+        float steps = math.max(0.0, math.floor((high - t_ent) / trail))
+        t_sl := math.max(t_sl, (t_ent - t_risk) + steps * trail)
+
+    if strategy.position_size < 0
+        float steps = math.max(0.0, math.floor((t_ent - low) / trail))
+        t_sl := math.min(t_sl, (t_ent + t_risk) - steps * trail)
+
+    strategy.exit("Exit", stop=t_sl, limit=t_tp)
+
+// ─────────────────────────────────────────────
+// VISUALIZACIÓN DEL RANGO
+// ─────────────────────────────────────────────
+var line line_high = na
+var line line_low  = na
+
+// Extender líneas del rango mientras no haya nueva sesión
+if not in_session and not na(r_high)
+    if na(line_high) or is_new_day
+        line.delete(line_high)
+        line.delete(line_low)
+        line_high := line.new(bar_index, r_high, bar_index + 1, r_high,
+                              color=color.orange, style=line.style_dashed, width=1)
+        line_low  := line.new(bar_index, r_low,  bar_index + 1, r_low,
+                              color=color.orange, style=line.style_dashed, width=1)
+    else
+        line.set_x2(line_high, bar_index)
+        line.set_x2(line_low,  bar_index)
+
+// SL trailing en naranja
+var line sl_line = na
+if strategy.position_size != 0 and not na(t_sl)
+    if na(sl_line)
+        sl_line := line.new(bar_index, t_sl, bar_index + 1, t_sl,
+                            color=color.orange, width=2)
+    else
+        line.set_xy1(sl_line, bar_index, t_sl)
+        line.set_xy2(sl_line, bar_index + 1, t_sl)
+else
+    if not na(sl_line)
+        line.delete(sl_line)
+        sl_line := na

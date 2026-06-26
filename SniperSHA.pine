@@ -1,0 +1,150 @@
+//@version=6 
+strategy('Sniper + SHA', overlay = true, initial_capital = 460, default_qty_type = strategy.percent_of_equity, default_qty_value = 8, process_orders_on_close = true)
+
+// --- DETECCIÓN DE ACTIVO ---
+isGold   = str.contains(syminfo.ticker, "XAU") or str.contains(syminfo.ticker, "GOLD")
+isSilver = str.contains(syminfo.ticker, "XAG") or str.contains(syminfo.ticker, "SILVER")
+isCrypto = str.contains(syminfo.ticker, "BTC") or str.contains(syminfo.ticker, "ETH") or str.contains(syminfo.ticker, "SOL") or str.contains(syminfo.ticker, "BNB") or syminfo.type == "crypto"
+isIndex  = str.contains(syminfo.ticker, "NAS") or str.contains(syminfo.ticker, "US100") or str.contains(syminfo.ticker, "US30") or str.contains(syminfo.ticker, "US500") or str.contains(syminfo.ticker, "SPX") or str.contains(syminfo.ticker, "DAX") or str.contains(syminfo.ticker, "FTSE") or syminfo.type == "index"
+
+// --- PARÁMETROS MAESTROS (BLOQUEADOS PARA 51.87 EN PLATA) ---
+// Selección del tipo de activo
+string market_type = input.string("auto", "Tipo de activo", options=["auto", "indice", "forex", "crypto"]) // auto detecta según el ticker
+
+// Ajustes por tipo de activo (ATR multiplier y BE RR)
+float atr_mult = isSilver ? 0.1 : isCrypto ? 0.15 : isIndex ? 0.5 : 0.6
+float minRR    = input.float(1.2, "RR mínimo (TP)", minval=0.5, maxval=5.0, step=0.1)  // índice: 1.2 es más alcanzable que 2.0
+float beRR     = isCrypto ? 0.5 : isIndex ? 0.4 : 0.7  // índice: BE al llegar al 40% del riesgo
+int adx_min    = isSilver ? 23 : isCrypto ? 23 : isIndex ? 28 : 23   // índice: 28 → evita laterales ruidosos
+
+if market_type == "indice"
+    atr_mult := 0.5   // SL más amplio para absorber ruido del índice
+    beRR     := 0.5
+    adx_min  := 28    // tendencia más fuerte requerida
+else if market_type == "forex"
+    atr_mult := 0.1
+    beRR     := 0.7
+else if market_type == "crypto"
+    atr_mult := 0.15
+    beRR     := 0.5
+    adx_min  := 25
+
+// --- INDICADORES ADAPTATIVOS ---
+int ema_period = isSilver ? 9 : 21
+emaVal = ta.ema(close, ema_period)
+
+[_, _, adx] = ta.dmi(14, 14)
+atr = ta.atr(14)
+bool filtro = isSilver ? (adx > adx_min and ta.rising(adx, 1)) : (adx > adx_min)
+
+// --- FILTRO HTF (1 HORA) — sólo para índices ---
+// Evita entrar en contra de la tendencia mayor de 1H
+// Si el 15min está subiendo pero el 1H está bajando → probable reversión
+float ema_1h   = request.security(syminfo.tickerid, "60", ta.ema(close, 21), lookahead=barmerge.lookahead_off)
+bool htf_bull  = close > ema_1h   // tendencia 1H alcista
+bool htf_bear  = close < ema_1h   // tendencia 1H bajista
+
+// --- IMPULSE MACD ---
+mi = ta.sma(close, 34)
+md = close > mi ? close - ta.lowest(low, 34) : close < mi ? close - ta.highest(high, 34) : 0
+sh = md - ta.sma(md, 9)
+
+// --- VARIABLES ---
+var float t_sl   = na
+var float t_tp   = na
+var float t_ent  = na
+var float t_risk = na  // riesgo inicial fijo (para calcular pasos del trailing)
+
+// --- LÓGICA DE ENTRADA (PRECISIÓN 51.87) ---
+// Añadido filtro IMACD para evitar entradas laterales
+imacd_threshold = atr * 0.3   // umbral de momentum mínimo
+imacd_filter = math.abs(sh) > imacd_threshold
+impulso_subiendo = sh > 0 and sh > sh[1] and imacd_filter   // histograma positivo y creciendo
+impulso_bajando  = sh < 0 and sh < sh[1] and imacd_filter   // histograma negativo y cayendo
+
+// Filtro de tendencia EMA 15min
+bool ema_long_ok  = close > emaVal
+bool ema_short_ok = close < emaVal
+
+// --- FILTRO DE PROXIMIDAD A EMA ---
+// Si el precio ya está muy lejos de la EMA, el movimiento está extendido y
+// es muy probable que revierta → no entrar
+// Índice: max 2× ATR desde la EMA; otros activos: 3× ATR
+float max_dist = isIndex ? 2.0 : 3.0
+bool near_ema = math.abs(close - emaVal) < atr * max_dist
+
+longC  = strategy.position_size == 0 and impulso_subiendo and high > high[1] and filtro
+          and ema_long_ok
+          and near_ema                          // no perseguir extensiones
+          and (isIndex ? htf_bull : true)       // [MQ5-CRITICAL] 1H alineado alcista
+
+shortC = strategy.position_size == 0 and impulso_bajando  and low  < low[1]  and filtro
+          and ema_short_ok
+          and near_ema                          // no perseguir extensiones
+          and (isIndex ? htf_bear : true)       // [MQ5-CRITICAL] 1H alineado bajista
+
+if longC
+    t_ent  := close
+    t_sl   := low[1] - (atr * atr_mult)
+    t_tp   := close + (math.abs(close - t_sl) * minRR)
+    t_risk := math.abs(close - t_sl)  // guardar riesgo inicial
+    strategy.entry("L", strategy.long)
+    label.new(bar_index, low, "COMPRA", color=color.green, textcolor=color.white, style=label.style_label_up, size=size.small)
+    box.new(bar_index, t_tp, bar_index + 10, close, bgcolor=color.new(color.green, 55), border_color=na)
+    box.new(bar_index, close, bar_index + 10, t_sl, bgcolor=color.new(color.red, 55), border_color=na)
+
+if shortC
+    t_ent  := close
+    t_sl   := high[1] + (atr * atr_mult)
+    t_tp   := close - (math.abs(close - t_sl) * minRR)
+    t_risk := math.abs(close - t_sl)  // guardar riesgo inicial
+    strategy.entry("S", strategy.short)
+    label.new(bar_index, high, "VENTA", color=color.red, textcolor=color.white, style=label.style_label_down, size=size.small)
+    box.new(bar_index, close, bar_index + 10, t_tp, bgcolor=color.new(#4caf4f, 55), border_color=na)
+    box.new(bar_index, t_sl, bar_index + 10, close, bgcolor=color.new(#ff5252, 55), border_color=na)
+
+// --- GESTIÓN DE RIESGO ---
+if strategy.position_size != 0
+    float trail = t_risk / 3.0
+
+    if strategy.position_size > 0 and not na(trail)
+        // BE inmediato: si precio avanza >= beRR*riesgo, SL salta a entrada de golpe
+        // Esto captura el regreso rápido antes de que el trail por tercios alcance BE
+        if high >= t_ent + t_risk * beRR
+            t_sl := math.max(t_sl, t_ent)
+        // Trail por tercios: sigue subiendo después del BE
+        float steps = math.max(0.0, math.floor((high - t_ent) / trail))
+        t_sl := math.max(t_sl, (t_ent - t_risk) + steps * trail)
+
+    if strategy.position_size < 0 and not na(trail)
+        // BE inmediato al bajar >= beRR*riesgo
+        if low <= t_ent - t_risk * beRR
+            t_sl := math.min(t_sl, t_ent)
+        // Trail por tercios hacia abajo
+        float steps = math.max(0.0, math.floor((t_ent - low) / trail))
+        t_sl := math.min(t_sl, (t_ent + t_risk) - steps * trail)
+
+    strategy.exit("Exit", stop=t_sl, limit=t_tp)
+    // Dibujar SL trailing en naranja
+    var line sl_trail_line = na
+    if strategy.position_size != 0
+        if na(sl_trail_line)
+            sl_trail_line := line.new(bar_index, t_sl, bar_index + 10, t_sl, color=color.orange, width=2)
+        else
+            line.set_xy1(sl_trail_line, bar_index, t_sl)
+            line.set_xy2(sl_trail_line, bar_index + 10, t_sl)
+    else
+        if not na(sl_trail_line)
+            line.delete(sl_trail_line)
+            sl_trail_line := na
+
+// --- VISUALIZACIÓN LIGERA (SHA) ---
+sha_len = 10
+s_o = ta.ema(open, sha_len), s_c = ta.ema(close, sha_len)
+var float sha_open = na
+sha_close = (s_o + ta.ema(high, sha_len) + ta.ema(low, sha_len) + s_c) / 4
+sha_open := na(sha_open) ? (s_o + s_c) / 2 : (sha_open + sha_close) / 2
+f_o = ta.ema(sha_open, sha_len), f_c = ta.ema(sha_close, sha_len)
+
+plotcandle(f_o, f_c, f_c, f_o, "SHA", color = f_c > f_o ? color.new(color.green, 90) : color.new(color.red, 90), bordercolor=na)
+plot(emaVal, "EMA Adaptativa", color=color.new(#0a46ea, 35), linewidth=2)

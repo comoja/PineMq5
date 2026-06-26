@@ -1,0 +1,204 @@
+//@version=6
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║  SniperSilver  –  ARCHIVO MASTER (Pine Script)                  ║
+// ║  Al replicar a MQ5, preservar TODAS las secciones [MQ5-CRITICAL]║
+// ╠══════════════════════════════════════════════════════════════════╣
+// ║  CHECKLIST DE TRADUCCIÓN A MQ5:                                 ║
+// ║  [✓] 1. GetOwnPositionType() devuelve -1 / BUY / SELL           ║
+// ║  [✓] 2. try_long  bloquea si hay SHORT  (not in_short)          ║
+// ║  [✓] 3. try_short bloquea si hay LONG   (not in_long)           ║
+// ║  [✓] 4. Trailing por tercios (trail = t_risk / 3)               ║
+// ║  [✓] 5. Filtro magic_number = 998877 en TODAS las queries       ║
+// ╚══════════════════════════════════════════════════════════════════╝
+strategy('SniperSilver', overlay=true,
+         initial_capital=450,
+         default_qty_type=strategy.percent_of_equity,
+         default_qty_value=8,
+         process_orders_on_close=false)
+
+// ─────────────────────────────────────────────
+// INPUTS
+// ─────────────────────────────────────────────
+float riskPercent = input.float(8.0,  "Riesgo por operación (%)", minval=0.1, step=0.5)
+
+// ─────────────────────────────────────────────
+// DETECCIÓN DE ACTIVO
+// ─────────────────────────────────────────────
+bool isSilver = str.contains(str.upper(syminfo.ticker), "XAG") or str.contains(str.upper(syminfo.ticker), "SILVER")
+
+// ─────────────────────────────────────────────
+// INDICADORES
+// ─────────────────────────────────────────────
+// Motor 1 – Plata (EMA 9, ATR 14)
+float emaXAG   = ta.ema(close, 9)
+float atrXAG   = ta.atr(14)
+
+// Motor 2 – Oro / otros (EMA 200, ADX 14, ATR 14)
+float emaUNI   = ta.ema(close, 200)
+float atrUNI   = ta.atr(14)
+
+// ADX nativo — equivalente exacto a iADX(14) del MQ5
+// ta.dmi() usa el algoritmo Wilder idéntico al indicador nativo de MT5
+[_, _, adxVal] = ta.dmi(14, 14)
+
+// Filtros
+// filtroXAG: solo ADX > 20 (sin exigir que esté subiendo, demasiado restrictivo)
+bool filtroXAG = adxVal > 20
+bool filtroUNI = adxVal > 22
+
+// Canal de ruptura: máx/mín de las últimas 80 velas (vela 1 en adelante)
+float upperUNI = ta.highest(high, 80)[1]
+float lowerUNI = ta.lowest(low,  80)[1]
+
+// ─────────────────────────────────────────────
+// VARIABLES PERSISTENTES
+// ─────────────────────────────────────────────
+var float t_ent    = na
+var float t_sl     = na
+var float t_tp     = na
+var float t_risk   = na   // distancia entrada→SL (base del trailing)
+
+// Cooldown para activos que no son Plata
+var int   cooldown_bar = 0
+var bool  had_pos      = false
+
+// ─────────────────────────────────────────────
+// SISTEMA COOLDOWN (solo para no-Plata)
+// ─────────────────────────────────────────────
+bool has_pos = strategy.position_size != 0
+if not isSilver
+    if had_pos and not has_pos         // se acaba de cerrar posición
+        cooldown_bar := bar_index + 50
+    had_pos := has_pos
+
+bool respiro_ok = isSilver or (bar_index > cooldown_bar)
+
+// ─────────────────────────────────────────────
+// [MQ5-CRITICAL #1] DETECCIÓN DE DIRECCIÓN
+// strategy.position_size > 0  → LONG   (MQ5: POSITION_TYPE_BUY)
+// strategy.position_size < 0  → SHORT  (MQ5: POSITION_TYPE_SELL)
+// strategy.position_size == 0 → flat   (MQ5: pos_type == -1)
+// ─────────────────────────────────────────────
+bool in_long  = strategy.position_size > 0
+bool in_short = strategy.position_size < 0
+
+// ─────────────────────────────────────────────
+// [MQ5-CRITICAL #2] CONDICIONES DE ENTRADA CON PROTECCIÓN DE SENTIDO
+// try_long  NO se activa si ya hay un SHORT abierto  → not in_short
+// try_short NO se activa si ya hay un LONG  abierto  → not in_long
+// MQ5: pos_type != POSITION_TYPE_SELL  /  pos_type != POSITION_TYPE_BUY
+// ─────────────────────────────────────────────
+bool try_long  = false
+bool try_short = false
+
+if not in_short
+    if isSilver
+        // LONG: barra alcista cerrando sobre EMA9 con ADX activo
+        bool xag_long_ok = close[1] > emaXAG[1] and close[1] > open[1] and close[1] > close[2]
+        try_long := xag_long_ok and filtroXAG
+    else
+        try_long := respiro_ok and (close[2] <= upperUNI and close[1] > upperUNI) and close[1] > emaUNI[1] and filtroUNI
+
+if not in_long
+    if isSilver
+        // SHORT: barra bajista cerrando bajo EMA9 con ADX activo
+        bool xag_short_ok = close[1] < emaXAG[1] and close[1] < open[1] and close[1] < close[2]
+        try_short := xag_short_ok and filtroXAG
+    else
+        try_short := respiro_ok and (close[2] >= lowerUNI and close[1] < lowerUNI) and close[1] < emaUNI[1] and filtroUNI
+
+// ─────────────────────────────────────────────
+// ENTRADAS
+// ─────────────────────────────────────────────
+if not has_pos and try_long
+    t_ent  := close[1]
+    // SL: 1.0×ATR bajo el mínimo anterior (0.1 era demasiado ajustado → stop-out inmediato)
+    t_sl   := isSilver ? (low[1] - atrXAG * 1.0) : (low[1] - atrUNI * 1.5)
+    t_risk := math.abs(t_ent - t_sl)
+    t_tp   := t_ent + t_risk * (isSilver ? 1.1 : 2.0)
+    strategy.entry("L", strategy.long)
+    label.new(bar_index, low, "↑ LONG", color=color.green,
+              textcolor=color.white, style=label.style_label_up, size=size.small)
+    box.new(bar_index, t_tp,  bar_index+20, t_ent,
+            bgcolor=color.new(color.green,75), border_color=color.new(color.green,40))
+    box.new(bar_index, t_ent, bar_index+20, t_sl,
+            bgcolor=color.new(color.red,75),   border_color=color.new(color.red,40))
+
+if not has_pos and try_short
+    t_ent  := close[1]
+    t_sl   := isSilver ? (high[1] + atrXAG * 0.1) : (high[1] + atrUNI * 2.0)
+    t_risk := math.abs(t_ent - t_sl)
+    t_tp   := t_ent - t_risk * (isSilver ? 1.2 : 3.0)
+    strategy.entry("S", strategy.short)
+    label.new(bar_index, high, "↓ SHORT", color=color.red,
+              textcolor=color.white, style=label.style_label_down, size=size.small)
+    box.new(bar_index, t_ent, bar_index+20, t_tp,
+            bgcolor=color.new(color.green,75), border_color=color.new(color.green,40))
+    box.new(bar_index, t_sl,  bar_index+20, t_ent,
+            bgcolor=color.new(color.red,75),   border_color=color.new(color.red,40))
+
+// ─────────────────────────────────────────────
+// [MQ5-CRITICAL #3] TRAILING STOP POR TERCIOS
+// trail = t_risk / 3
+// MQ5: trail_step = MathAbs(t_ent - t_sl) / 3.0
+// ─────────────────────────────────────────────
+if has_pos and not na(t_risk)
+    float trail = t_risk / 3.0
+
+    if in_long
+        float steps = math.max(0.0, math.floor((high - t_ent) / trail))
+        t_sl := math.max(t_sl, (t_ent - t_risk) + steps * trail)
+
+    if in_short
+        float steps = math.max(0.0, math.floor((t_ent - low) / trail))
+        t_sl := math.min(t_sl, (t_ent + t_risk) - steps * trail)
+
+    strategy.exit("Exit", stop=t_sl, limit=t_tp)
+
+// ─────────────────────────────────────────────
+// RESETEO DE VARIABLES AL CERRAR POSICIÓN
+// ─────────────────────────────────────────────
+if not has_pos
+    t_ent  := na
+    t_sl   := na
+    t_tp   := na
+    t_risk := na
+
+// ─────────────────────────────────────────────
+// VISUALIZACIÓN
+// ─────────────────────────────────────────────
+plot(emaXAG,  "EMA 9",   color=color.new(color.aqua,   40), linewidth=1)
+plot(emaUNI,  "EMA 200", color=color.new(color.purple, 40), linewidth=2)
+
+var line sl_line = na
+if has_pos and not na(t_sl)
+    if na(sl_line)
+        sl_line := line.new(bar_index, t_sl, bar_index+1, t_sl,
+                            color=color.orange, width=2)
+    else
+        line.set_xy1(sl_line, bar_index, t_sl)
+        line.set_xy2(sl_line, bar_index+1, t_sl)
+else
+    if not na(sl_line)
+        line.delete(sl_line)
+        sl_line := na
+
+// ─────────────────────────────────────────────
+// TABLA DE CONTROL
+// ─────────────────────────────────────────────
+var table panel = table.new(position.top_right, 2, 5,
+                             bgcolor=color.new(color.black,10),
+                             border_width=1, border_color=color.gray)
+if barstate.islast
+    float trail_display = na(t_risk) ? 0.0 : t_risk / 3.0
+    string dir = in_long ? "🟢 LONG" : in_short ? "🔴 SHORT" : "⬜ FLAT"
+    table.cell(panel, 0, 0, "Activo",       text_color=color.white)
+    table.cell(panel, 1, 0, isSilver ? "PLATA (XAG)" : "OTRO",  text_color=color.yellow)
+    table.cell(panel, 0, 1, "Posición",     text_color=color.white)
+    table.cell(panel, 1, 1, dir,            text_color=color.white)
+    table.cell(panel, 0, 2, "Trail (1/3)",  text_color=color.white)
+    table.cell(panel, 1, 2, str.tostring(trail_display, format.mintick), text_color=color.orange)
+    table.cell(panel, 0, 3, "Capital",      text_color=color.white)
+    table.cell(panel, 1, 3, "$" + str.tostring(strategy.equity, "#.##"), text_color=color.green)
+    table.cell(panel, 0, 4, "Trades",       text_color=color.white)
+    table.cell(panel, 1, 4, str.tostring(strategy.closedtrades), text_color=color.white)
