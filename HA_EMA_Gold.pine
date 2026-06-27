@@ -58,7 +58,7 @@ use_ha_strength = input.bool(false, "Usar Filtro Fuerza HA (Sin Mechas)", group=
 gp_gold       = "--- FILTROS ESPECÍFICOS GOLD ---"
 
 // Filtro de Sesión: operar solo en Londres (08:00-12:00) + NY (13:00-17:00) UTC
-use_session   = input.bool(true, "Filtro de Sesión (Overlap Londres+NY)", group=gp_gold,
+use_session   = input.bool(false, "Filtro de Sesión (Overlap Londres+NY)", group=gp_gold,
                  tooltip="Activo: evita el ruido de Asia. Asegúrate de que tu feed de FOREX.com está en UTC")
 session_str   = input.string("0800-1700", "Horario Permitido (UTC)",  group=gp_gold,
                  tooltip="08:00-17:00 UTC = Londres + NY completos")
