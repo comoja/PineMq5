@@ -1,0 +1,341 @@
+//@version=6
+strategy("HA_EMA Multi (Gold & Silver)", overlay=true, initial_capital=450,
+         default_qty_type=strategy.percent_of_equity, default_qty_value=10,
+         commission_type=strategy.commission.percent, commission_value=0.04)
+
+//+------------------------------------------------------------------+
+//|                                             HA_EMA_Multi.pine    |
+//|               Estrategia Unificada Heikin-Ashi + EMA             |
+//|                    para ORO (XAU) y PLATA (XAG)                  |
+//|          Con Autodetección de Activo, MTF y Break-Even           |
+//+------------------------------------------------------------------+
+
+// ════════════════════════════════════════════════════════════════════
+// 1. INPUTS DE PERFIL Y AUTODETECCIÓN
+// ════════════════════════════════════════════════════════════════════
+gp_prof       = "--- PERFIL DE CONFIGURACIÓN ---"
+asset_profile = input.string("Auto", "Perfil de Activo", options=["Auto", "Oro (XAUUSD)", "Plata (XAGUSD)", "Manual"], group=gp_prof,
+                 tooltip="Auto: detecta el símbolo actual para aplicar los parámetros óptimos del Oro o Plata. Manual: usa los parámetros de abajo.")
+
+// ════════════════════════════════════════════════════════════════════
+// 2. INPUTS DE GESTIÓN DE RIESGO
+// ════════════════════════════════════════════════════════════════════
+gp_risk       = "--- GESTIÓN DE RIESGO ---"
+risk_perc     = input.float(1.0, "Riesgo por operación (%)", minval=0.1, maxval=10.0, group=gp_risk,
+                 tooltip="Porcentaje de la equidad a arriesgar basado en la distancia del SL inicial")
+use_tp        = input.bool(true, "Usar Take Profit Fijo", group=gp_risk)
+rr_ratio      = input.float(3.0, "Relación Riesgo/Recompensa (R:R)", minval=0.5, step=0.1, group=gp_risk,
+                 tooltip="Oro sugerido: 3.0. Plata sugerido: 2.5.")
+use_be        = input.bool(true, "Mover a Break-Even (Precio Entrada)", group=gp_risk,
+                 tooltip="ACTIVADO: protege el capital moviendo el SL a precio de entrada cuando el precio avanza a tu favor.")
+be_ratio      = input.float(1.0, "Multiplicador R:R para Break-Even", minval=0.3, step=0.1, group=gp_risk,
+                 tooltip="1.0 = mueve a Break-Even al alcanzar beneficio 1:1 R:R (seguridad absoluta).")
+
+// ════════════════════════════════════════════════════════════════════
+// 3. INPUTS MANUALES (Solo si Perfil = Manual)
+// ════════════════════════════════════════════════════════════════════
+gp_param        = "--- PARÁMETROS MANUALES (Si perfil = Manual) ---"
+ema_tf_input    = input.string("Auto", "Temporalidad de EMAs", options=["Auto", "15", "30", "60", "180", "240", "1440"], group=gp_param,
+                   tooltip="Auto: fuerza EMAs a 3h en intradía para filtrar ruido.")
+ema_fast_len_in = input.int(21,  "Período EMA Rápida manual", minval=1, group=gp_param)
+ema_slow_len_in = input.int(55,  "Período EMA Lenta manual", minval=1, group=gp_param)
+swing_period_in = input.int(8,   "Velas Swing High/Low manual", minval=2, group=gp_param)
+sl_buf_pts_in   = input.float(2.0, "Buffer SL manual (Ticks/Puntos)", minval=0.0, group=gp_param)
+
+use_imacd_in    = input.bool(false, "Usar iMACD manual", group=gp_param)
+imacd_len_in    = input.int(35,     "Período iMACD manual", minval=1, group=gp_param)
+
+use_ema_spr_in  = input.bool(true,  "Usar Abertura EMAs manual", group=gp_param)
+ema_spr_mult_in = input.float(0.4,  "Abertura Mínima EMAs manual (× ATR)", minval=0.0, step=0.1, group=gp_param)
+
+use_ha_str_in   = input.bool(false, "Fuerza Heikin-Ashi manual", group=gp_param)
+use_ema200_in   = input.bool(false, "Filtro EMA 200 manual", group=gp_param)
+ema200_len_in   = input.int(200,    "Período EMA 200 manual", minval=1, group=gp_param)
+
+// Filtro Horario General (Londres + Nueva York)
+gp_ses          = "--- CONTROL DE SESIÓN ---"
+use_session     = input.bool(false, "Usar Sesión Horaria", group=gp_ses,
+                   tooltip="Desactivado por defecto. Activa si solo quieres operar en horas específicas.")
+session_str     = input.session("0800-1700", "Horario Operativo (UTC)", group=gp_ses)
+
+// ════════════════════════════════════════════════════════════════════
+// 4. AUTODETECCIÓN Y ASIGNACIÓN DE PARÁMETROS EFECTIVOS
+// ════════════════════════════════════════════════════════════════════
+ticker_lower = str.lower(syminfo.ticker)
+is_gold_symbol   = str.contains(ticker_lower, "xau") or str.contains(ticker_lower, "gold")
+is_silver_symbol = str.contains(ticker_lower, "xag") or str.contains(ticker_lower, "silver")
+
+is_gold   = asset_profile == "Oro (XAUUSD)"   or (asset_profile == "Auto" and is_gold_symbol)
+is_silver = asset_profile == "Plata (XAGUSD)" or (asset_profile == "Auto" and is_silver_symbol)
+
+// Asignación inteligente de variables basadas en el perfil cargado
+ema_tf          = is_gold ? "Auto" : is_silver ? "15" : ema_tf_input // Plata opera con EMAs locales de 15m por defecto
+ema_fast_len    = is_gold ? 21    : is_silver ? 9     : ema_fast_len_in
+ema_slow_len    = is_gold ? 55    : is_silver ? 21    : ema_slow_len_in
+swing_period    = is_gold ? 8     : is_silver ? 5     : swing_period_in
+sl_buffer_pts   = is_gold ? 2.0   : is_silver ? 0.0   : sl_buf_pts_in
+
+use_imacd       = is_gold ? false : is_silver ? true  : use_imacd_in
+imacd_len       = is_gold ? 35    : is_silver ? 35    : imacd_len_in
+
+use_ema_spread  = is_gold ? true  : is_silver ? false : use_ema_spr_in
+ema_spread_mult = is_gold ? 0.4   : is_silver ? 0.0   : ema_spr_mult_in
+
+use_ha_strength = is_gold ? false : is_silver ? true  : use_ha_str_in
+use_ema200      = is_gold ? false : is_silver ? true  : use_ema200_in
+ema200_len      = is_gold ? 200   : is_silver ? 200   : ema200_len_in
+
+// ════════════════════════════════════════════════════════════════════
+// 5. CÁLCULO DE VELAS HEIKIN-ASHI RECURSIVAS NATIVAS
+// ════════════════════════════════════════════════════════════════════
+var float haOpen = na
+haClose = (open + high + low + close) / 4
+haOpen := na(haOpen[1]) ? (open + close) / 2 : (haOpen[1] + haClose[1]) / 2
+haHigh = math.max(high, math.max(haOpen, haClose))
+haLow  = math.min(low,  math.min(haOpen, haClose))
+
+ha_green = haClose > haOpen
+ha_red   = haClose < haOpen
+
+// Pintar velas HA semi-transparentes de fondo
+plotcandle(haOpen, haHigh, haLow, haClose, title="Velas Heikin-Ashi",
+           color=ha_green ? color.new(color.green, 85) : color.new(color.red, 85),
+           wickcolor=ha_green ? color.new(color.green, 80) : color.new(color.red, 80),
+           bordercolor=na)
+
+// ════════════════════════════════════════════════════════════════════
+// 6. RESOLUCIÓN DE TEMPORALIDADES MTF Y MEDIAS MÓVILES
+// ════════════════════════════════════════════════════════════════════
+string resolved_tf = ema_tf
+if ema_tf == "Auto"
+    if timeframe.isminutes
+        if timeframe.multiplier <= 180
+            resolved_tf := "180" // Forzado a 3h para cualquier gráfico intradía en el Oro
+        else
+            resolved_tf := "1440"
+    else if timeframe.isdaily
+        resolved_tf := "W"
+    else
+        resolved_tf := "M"
+
+// Cálculo de EMAs mediante request.security en la temporalidad resuelta
+ema_fast_base = ta.ema(close, ema_fast_len)
+ema_slow_base = ta.ema(close, ema_slow_len)
+ema_200_base  = ta.ema(close, ema200_len)
+
+ema_fast = request.security(syminfo.tickerid, resolved_tf, ema_fast_base, lookahead=barmerge.lookahead_off)
+ema_slow = request.security(syminfo.tickerid, resolved_tf, ema_slow_base, lookahead=barmerge.lookahead_off)
+ema_200  = request.security(syminfo.tickerid, resolved_tf, ema_200_base, lookahead=barmerge.lookahead_off)
+
+plot(ema_fast, "EMA Rápida", color=color.new(color.lime, 10), linewidth=2)
+plot(ema_slow, "EMA Lenta",  color=color.new(color.red,  10), linewidth=2)
+plot(use_ema200 ? ema_200 : na, "EMA 200", color=color.new(color.blue, 30), linewidth=1, linestyle=plot.linestyle_dashed)
+
+// ════════════════════════════════════════════════════════════════════
+// 7. CÁLCULO DE INDICADORES DE FILTRO
+// ════════════════════════════════════════════════════════════════════
+
+// --- FILTRO DE CONTROL HORARIO ---
+in_session = not use_session or not na(time(timeframe.period, session_str, "UTC"))
+
+// --- FILTRO DE ABERTURA DE EMAs ---
+distancia_emas = math.abs(ema_fast - ema_slow)
+abertura_ok    = not use_ema_spread or (distancia_emas >= (ta.atr(14) * ema_spread_mult))
+
+// --- FILTRO IMPULSE MACD ---
+calc_zlema(src, length) =>
+    ema1 = ta.ema(src, length)
+    ema2 = ta.ema(ema1, length)
+    d = ema1 - ema2
+    ema1 + d
+
+imacd_src = hlc3
+hi = ta.rma(high, imacd_len)
+lo = ta.rma(low, imacd_len)
+mi = calc_zlema(imacd_src, imacd_len)
+md = mi > hi ? mi - hi : mi < lo ? mi - lo : 0.0
+
+imacd_long_ok  = not use_imacd or (md > 0.0)
+imacd_short_ok = not use_imacd or (md < 0.0)
+
+// --- FILTROS DE OPTIMIZACIÓN SECUNDARIOS ---
+ema200_long_ok  = not use_ema200 or (close > ema_200)
+ema200_short_ok = not use_ema200 or (close < ema_200)
+
+ha_strength_long  = not use_ha_strength or (haLow  == haOpen)
+ha_strength_short = not use_ha_strength or (haHigh == haOpen)
+
+// ════════════════════════════════════════════════════════════════════
+// 8. CONDICIONES DE ALINEACIÓN Y GATILLOS
+// ════════════════════════════════════════════════════════════════════
+is_long_aligned  = (ema_fast > ema_slow) and ha_green and
+                   imacd_long_ok  and ema200_long_ok  and ha_strength_long  and
+                   in_session     and abertura_ok
+
+is_short_aligned = (ema_fast < ema_slow) and ha_red and
+                   imacd_short_ok and ema200_short_ok and ha_strength_short and
+                   in_session     and abertura_ok
+
+// Confirmación de velas consecutivas
+confirm_bars = 2
+var int long_count  = 0
+var int short_count = 0
+long_count  := is_long_aligned  ? long_count[1]  + 1 : 0
+short_count := is_short_aligned ? short_count[1] + 1 : 0
+
+trigger_long  = long_count  >= confirm_bars and long_count[1]  < confirm_bars
+trigger_short = short_count >= confirm_bars and short_count[1] < confirm_bars
+
+// ════════════════════════════════════════════════════════════════════
+// 9. GESTIÓN DEL RIESGO Y DETERMINACIÓN DEL NIVELES DE SL/TP
+// ════════════════════════════════════════════════════════════════════
+lowest_low   = ta.lowest(low, swing_period)
+highest_high = ta.highest(high, swing_period)
+sl_buffer    = sl_buffer_pts * syminfo.mintick
+
+var float pending_sl = na
+var float pending_tp = na
+
+if trigger_long
+    pending_sl := lowest_low - sl_buffer
+    if (close - pending_sl) <= 0
+        pending_sl := close - syminfo.mintick
+    risk = close - pending_sl
+    pending_tp := use_tp ? (close + risk * rr_ratio) : na
+
+if trigger_short
+    pending_sl := highest_high + sl_buffer
+    if (pending_sl - close) <= 0
+        pending_sl := close + syminfo.mintick
+    risk = pending_sl - close
+    pending_tp := use_tp ? (close - risk * rr_ratio) : na
+
+// ════════════════════════════════════════════════════════════════════
+// 10. VARIABLES PERSISTENTES Y EJECUCIÓN DE ENTRADAS
+// ════════════════════════════════════════════════════════════════════
+var float active_sl    = na
+var float active_tp    = na
+var float trail_step   = na
+var float entry_p      = na
+var bool  be_triggered = false
+
+// Cálculo de lotaje en base a riesgo inicial
+risk_amount = strategy.equity * (risk_perc / 100.0)
+risk_dist   = math.abs(close - pending_sl)
+qty         = risk_amount / (risk_dist * syminfo.pointvalue)
+
+if trigger_long and strategy.position_size == 0
+    strategy.entry("Long", strategy.long, qty=qty)
+
+if trigger_short and strategy.position_size == 0
+    strategy.entry("Short", strategy.short, qty=qty)
+
+// Apertura del trade detectada
+pos_opened = ta.change(strategy.position_size) != 0 and strategy.position_size != 0
+
+if pos_opened
+    entry_p      := strategy.position_avg_price
+    active_sl    := pending_sl
+    active_tp    := pending_tp
+    trail_step   := math.abs(entry_p - active_sl) / 3.0
+    be_triggered := false
+
+// ════════════════════════════════════════════════════════════════════
+// 11. MOTOR DE GESTIÓN DINÁMICA: BREAK-EVEN Y TRAILING STOP
+// ════════════════════════════════════════════════════════════════════
+
+// --- ACTIVACIÓN DEL BREAK-EVEN ---
+if strategy.position_size != 0 and use_be and not be_triggered
+    distancia_inicial = math.abs(entry_p - pending_sl)
+    if strategy.position_size > 0
+        recorrido = high - entry_p
+        if recorrido >= (distancia_inicial * be_ratio)
+            active_sl := entry_p
+            be_triggered := true
+    else if strategy.position_size < 0
+        recorrido = entry_p - low
+        if recorrido >= (distancia_inicial * be_ratio)
+            active_sl := entry_p
+            be_triggered := true
+
+// --- GESTIÓN DEL TRAILING STOP POR TERCIOS ---
+if strategy.position_size > 0
+    recorrido = high - entry_p
+    niveles = math.floor(recorrido / trail_step)
+    if niveles > 0
+        initial_sl = entry_p - (trail_step * 3.0)
+        nuevo_sl = initial_sl + (trail_step * niveles)
+        if nuevo_sl > active_sl
+            active_sl := nuevo_sl
+
+else if strategy.position_size < 0
+    recorrido = entry_p - low
+    niveles = math.floor(recorrido / trail_step)
+    if niveles > 0
+        initial_sl = entry_p + (trail_step * 3.0)
+        nuevo_sl = initial_sl - (trail_step * niveles)
+        if nuevo_sl < active_sl or na(active_sl)
+            active_sl := nuevo_sl
+
+// Reseteo al cerrar posición
+if strategy.position_size == 0
+    active_sl    := na
+    active_tp    := na
+    trail_step   := na
+    entry_p      := na
+    be_triggered := false
+
+// Ejecución de salidas
+if strategy.position_size != 0
+    strategy.exit("Exit", stop=active_sl, limit=active_tp)
+
+// ════════════════════════════════════════════════════════════════════
+// 12. PLOTS DE NIVELES Y TABLA DE CONTROL
+// ════════════════════════════════════════════════════════════════════
+plot(strategy.position_size != 0 ? active_sl : na, "Stop Loss",   color=color.red,   style=plot.style_linebr, linewidth=2)
+plot(strategy.position_size != 0 and use_tp ? active_tp : na, "Take Profit", color=color.green, style=plot.style_linebr, linewidth=2)
+
+// Tabla de estadísticas
+var table main_table = table.new(position.top_right, 2, 9,
+     bgcolor=color.new(color.black, 15), border_width=1, border_color=color.gray)
+
+if barstate.islast
+    in_trade    = strategy.position_size != 0
+    atr_val     = ta.atr(14)
+    atr_display = str.tostring(atr_val, "#.##") + " USD"
+    
+    profile_name = is_gold ? "ORO (Auto)" : is_silver ? "PLATA (Auto)" : "MANUAL"
+    display_tf   = resolved_tf == "180" ? "3h" : resolved_tf == "240" ? "4h" : resolved_tf == "60" ? "1h" : resolved_tf == "30" ? "30m" : resolved_tf == "1440" ? "1d" : resolved_tf
+    imacd_status = not use_imacd ? "DESACTIVADO" : md == 0.0 ? "RANGO" : md > 0.0 ? "ALCISTA" : "BAJISTA"
+    imacd_color  = not use_imacd ? color.gray   : md == 0.0 ? color.orange : md > 0.0 ? color.green : color.red
+
+    table.cell(main_table, 0, 0, "Estrategia:",  text_color=color.white,  text_size=size.small)
+    table.cell(main_table, 1, 0, "HA_EMA MULTI",  text_color=color.yellow, text_size=size.small)
+
+    table.cell(main_table, 0, 1, "Perfil:",      text_color=color.white,  text_size=size.small)
+    table.cell(main_table, 1, 1, profile_name,   text_color=color.yellow, text_size=size.small)
+
+    table.cell(main_table, 0, 2, "Estado:",       text_color=color.white, text_size=size.small)
+    table.cell(main_table, 1, 2, in_trade ? "DENTRO" : "BUSCANDO",
+               text_color=in_trade ? color.green : color.yellow, text_size=size.small)
+
+    table.cell(main_table, 0, 3, "Sesión:",       text_color=color.white, text_size=size.small)
+    table.cell(main_table, 1, 3, in_session ? "ACTIVA" : "CERRADA",
+               text_color=in_session ? color.green : color.gray, text_size=size.small)
+
+    table.cell(main_table, 0, 4, "ATR (" + timeframe.period + "):", text_color=color.white, text_size=size.small)
+    table.cell(main_table, 1, 4, atr_display,     text_color=color.green, text_size=size.small)
+
+    table.cell(main_table, 0, 5, "TF EMAs:",       text_color=color.white, text_size=size.small)
+    table.cell(main_table, 1, 5, display_tf,       text_color=color.yellow, text_size=size.small)
+
+    table.cell(main_table, 0, 6, "iMACD:",        text_color=color.white, text_size=size.small)
+    table.cell(main_table, 1, 6, imacd_status,    text_color=imacd_color, text_size=size.small)
+
+    table.cell(main_table, 0, 7, "Equidad:",      text_color=color.white, text_size=size.small)
+    table.cell(main_table, 1, 7, "$" + str.tostring(strategy.equity, "#.##"),
+               text_color=color.green, text_size=size.small)
+
+    table.cell(main_table, 0, 8, "Rendimiento:",  text_color=color.white, text_size=size.small)
+    table.cell(main_table, 1, 8, str.tostring(strategy.netprofit, "#.##") + " USD",
+               text_color=strategy.netprofit >= 0 ? color.green : color.red, text_size=size.small)
