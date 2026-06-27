@@ -167,6 +167,12 @@ if strategy.position_size == 0 and strategy.position_size[1] == 0
 bool exitLong  = (strategy.position_size[1] > 0 and strategy.position_size == 0)
 bool exitShort = (strategy.position_size[1] < 0 and strategy.position_size == 0)
 
+if exitLong
+    label.new(bar_index, high, "▼ SALIDA L", color=color.red, textcolor=color.white, style=label.style_label_down, size=size.small)
+
+if exitShort
+    label.new(bar_index, low, "▲ SALIDA S", color=color.green, textcolor=color.white, style=label.style_label_up, size=size.small)
+
 // ══════════════════════════════════════════════════════════════════════════
 // DIBUJAR ENTRADA, SL TRAILING Y SALIDAS EN EL HISTÓRICO
 // ══════════════════════════════════════════════════════════════════════════
@@ -182,7 +188,6 @@ fill(plotEnt, plotSl, color=color.new(color.red, 95),   title="Zona de Pérdida 
 
 // Dibuja un punto rojo/círculo en el gráfico en el precio exacto de salida histórica (tSl de la barra anterior)
 plot(exitLong or exitShort ? tSl[1] : na, "Punto de Salida Real", color=color.red, style=plot.style_circles, linewidth=4)
-plotshape(exitLong or exitShort, title="Etiqueta Salida", style=shape.xcross, location=location.abovebar, color=color.red, size=size.tiny, text="SALIDA", textcolor=color.red)
 
 // ══════════════════════════════════════════════════════════════════════════
 // INDICADOR DE CALIDAD (bgcolor)
