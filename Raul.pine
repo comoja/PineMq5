@@ -211,6 +211,11 @@ if strategy.position_size == 0 and strategy.position_size[1] == 0
 bool exitLong  = (strategy.position_size[1] > 0 and strategy.position_size == 0)
 bool exitShort = (strategy.position_size[1] < 0 and strategy.position_size == 0)
 
+if exitLong or exitShort
+    huboAcumulacionValida := false
+    ultimoRangoMax        := na
+    ultimoRangoMin        := na
+
 // ══════════════════════════════════════════════════════════════════════════
 // DIBUJAR ETIQUETAS DE COMPRA, VENTA Y SALIDA
 // ══════════════════════════════════════════════════════════════════════════
