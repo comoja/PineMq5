@@ -39,8 +39,8 @@ sl_buffer_pts = input.float(2.0, "Buffer para el SL (Ticks/Puntos)", minval=0.0,
 gp_flt        = "--- FILTRO DE RANGO (iMACD) ---"
 use_imacd     = input.bool(true, "Usar Filtro Impulse MACD",  group=gp_flt,
                  tooltip="ACTIVADO: el iMACD filtra longs cuando el mercado cae y shorts cuando sube")
-imacd_len     = input.int(50,   "Período Impulse MACD",       minval=1, group=gp_flt,
-                 tooltip="50 = señal más limpia, filtra el ruido del Oro en 15m")
+imacd_len     = input.int(35,   "Período Impulse MACD",       minval=1, group=gp_flt,
+                 tooltip="35 = período base reactivo, reduce el retraso de alineación")
 
 // ════════════════════════════════════════════════════════════════════
 // INPUTS: FILTROS DE OPTIMIZACIÓN (GOLD-SPECIFIC)
@@ -74,8 +74,8 @@ atr_min_usd   = input.float(2.0,  "ATR Mínimo en USD (15m)",          minval=0.
 use_adx       = input.bool(true, "Filtro ADX (Tendencia)", group=gp_gold,
                  tooltip="ACTIVADO: reduce trades a solo mercados trending. Factor mejora de 1.1 a 2.6")
 adx_len       = input.int(14,   "Período ADX", minval=1, group=gp_gold)
-adx_min       = input.float(22.0, "ADX Mínimo", minval=5.0, step=1.0, group=gp_gold,
-                 tooltip="22+ = tendencia definida. Bajo 22 = consolidación o rango lateral")
+adx_min       = input.float(20.0, "ADX Mínimo", minval=5.0, step=1.0, group=gp_gold,
+                 tooltip="20+ = tendencia definida. Bajo 20 = consolidación o rango lateral")
 
 // Filtro RSI: evitar entradas en extremos de sobrecompra/sobreventa
 use_rsi       = input.bool(false, "Filtro RSI (Evitar Extremos)", group=gp_gold,
