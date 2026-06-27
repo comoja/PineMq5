@@ -1,150 +1,373 @@
-//@version=6 
-strategy('Sniper + SHA', overlay = true, initial_capital = 460, default_qty_type = strategy.percent_of_equity, default_qty_value = 8, process_orders_on_close = true)
+//@version=6
+// ══════════════════════════════════════════════════════════════════════════
+// │                     SNIPER + SHA  v2.0                                │
+// │          Estrategia multi-activo con gestión de riesgo completa       │
+// │                                                                        │
+// │  RESUMEN:                                                              │
+// │  - Señal: Impulse MACD + EMA adaptativa + filtro HTF (1H)             │
+// │  - SL:    ATR × multiplicador bajo/sobre el mínimo/máximo anterior    │
+// │  - TP:    Precio entrada ± riesgo × RR                                │
+// │  - Trail: Por tercios (BE → 50%TP → punto a punto)                   │
+// │  - Filtro rango: Impulse MACD evita entradas en laterales             │
+// │  - Calidad: bgcolor verde=condiciones alcistas / rojo=bajistas         │
+// │                                                                        │
+// │  [MQ5-CRITICAL] Magic Number: ver input "Identificación"              │
+// ══════════════════════════════════════════════════════════════════════════
 
-// --- DETECCIÓN DE ACTIVO ---
-isGold   = str.contains(syminfo.ticker, "XAU") or str.contains(syminfo.ticker, "GOLD")
-isSilver = str.contains(syminfo.ticker, "XAG") or str.contains(syminfo.ticker, "SILVER")
-isCrypto = str.contains(syminfo.ticker, "BTC") or str.contains(syminfo.ticker, "ETH") or str.contains(syminfo.ticker, "SOL") or str.contains(syminfo.ticker, "BNB") or syminfo.type == "crypto"
-isIndex  = str.contains(syminfo.ticker, "NAS") or str.contains(syminfo.ticker, "US100") or str.contains(syminfo.ticker, "US30") or str.contains(syminfo.ticker, "US500") or str.contains(syminfo.ticker, "SPX") or str.contains(syminfo.ticker, "DAX") or str.contains(syminfo.ticker, "FTSE") or syminfo.type == "index"
+strategy("Sniper + SHA v2", overlay=true,
+         initial_capital      = 460,
+         default_qty_type     = strategy.percent_of_equity,
+         default_qty_value    = 8,
+         process_orders_on_close = true,
+         commission_type      = strategy.commission.percent,
+         commission_value     = 0.04)
 
-// --- PARÁMETROS MAESTROS (BLOQUEADOS PARA 51.87 EN PLATA) ---
-// Selección del tipo de activo
-string market_type = input.string("auto", "Tipo de activo", options=["auto", "indice", "forex", "crypto"]) // auto detecta según el ticker
+// ══════════════════════════════════════════════════════════════════════════
+// GRUPO: IDENTIFICACIÓN
+// ══════════════════════════════════════════════════════════════════════════
+gId      = "═══ Identificación ═══"
+magicNum = input.int(334455, "Magic Number (referencia MQ5)", group=gId)
 
-// Ajustes por tipo de activo (ATR multiplier y BE RR)
-float atr_mult = isSilver ? 0.1 : isCrypto ? 0.15 : isIndex ? 0.5 : 0.6
-float minRR    = input.float(1.2, "RR mínimo (TP)", minval=0.5, maxval=5.0, step=0.1)  // índice: 1.2 es más alcanzable que 2.0
-float beRR     = isCrypto ? 0.5 : isIndex ? 0.4 : 0.7  // índice: BE al llegar al 40% del riesgo
-int adx_min    = isSilver ? 23 : isCrypto ? 23 : isIndex ? 28 : 23   // índice: 28 → evita laterales ruidosos
+// ══════════════════════════════════════════════════════════════════════════
+// GRUPO: TIPO DE ACTIVO
+// ══════════════════════════════════════════════════════════════════════════
+gActivo    = "═══ Tipo de Activo ═══"
+marketType = input.string("auto", "Tipo de activo",
+             options=["auto","indice","forex","crypto","plata","oro"],
+             tooltip="'auto' detecta el instrumento automáticamente",
+             group=gActivo)
 
-if market_type == "indice"
-    atr_mult := 0.5   // SL más amplio para absorber ruido del índice
-    beRR     := 0.5
-    adx_min  := 28    // tendencia más fuerte requerida
-else if market_type == "forex"
-    atr_mult := 0.1
-    beRR     := 0.7
-else if market_type == "crypto"
-    atr_mult := 0.15
-    beRR     := 0.5
-    adx_min  := 25
+// Detección automática
+bool isSilver = str.contains(syminfo.ticker, "XAG") or str.contains(syminfo.ticker, "SILVER")
+bool isGold   = str.contains(syminfo.ticker, "XAU") or str.contains(syminfo.ticker, "GOLD")
+bool isCrypto = syminfo.type == "crypto"
+bool isForex  = syminfo.type == "forex"
+bool isIndex  = str.contains(syminfo.ticker, "NAS") or str.contains(syminfo.ticker, "US100") or str.contains(syminfo.ticker, "US30") or str.contains(syminfo.ticker, "US500") or str.contains(syminfo.ticker, "SPX") or str.contains(syminfo.ticker, "DAX") or str.contains(syminfo.ticker, "FTSE") or syminfo.type == "index"
 
-// --- INDICADORES ADAPTATIVOS ---
-int ema_period = isSilver ? 9 : 21
-emaVal = ta.ema(close, ema_period)
+// Tipo efectivo (override manual tiene prioridad)
+bool effSilver = marketType == "plata"  or (marketType == "auto" and isSilver)
+bool effGold   = marketType == "oro"    or (marketType == "auto" and isGold)
+bool effCrypto = marketType == "crypto" or (marketType == "auto" and isCrypto)
+bool effIndex  = marketType == "indice" or (marketType == "auto" and isIndex)
+bool effForex  = marketType == "forex"  or (marketType == "auto" and isForex)
 
-[_, _, adx] = ta.dmi(14, 14)
-atr = ta.atr(14)
-bool filtro = isSilver ? (adx > adx_min and ta.rising(adx, 1)) : (adx > adx_min)
+// ══════════════════════════════════════════════════════════════════════════
+// GRUPO: GESTIÓN DE RIESGO
+// ══════════════════════════════════════════════════════════════════════════
+gRiesgo    = "═══ Gestión de Riesgo ═══"
+riesgoPct  = input.float(1.0,  "Riesgo por operación (%)",         minval=0.1, maxval=10.0, step=0.1,  group=gRiesgo)
+minRR      = input.float(1.2,  "RR mínimo (TP/SL)",                minval=0.5, maxval=5.0,  step=0.1,  group=gRiesgo)
+atrMultInp = input.float(0.5,  "Multiplicador ATR para SL",        minval=0.05, maxval=3.0, step=0.05, group=gRiesgo)
+beRRInp    = input.float(0.4,  "Break-even trigger (× riesgo)",    minval=0.1, maxval=1.0,  step=0.05, group=gRiesgo, tooltip="SL sube a entrada cuando precio avanza esta fracción del riesgo inicial")
 
-// --- FILTRO HTF (1 HORA) — sólo para índices ---
-// Evita entrar en contra de la tendencia mayor de 1H
-// Si el 15min está subiendo pero el 1H está bajando → probable reversión
-float ema_1h   = request.security(syminfo.tickerid, "60", ta.ema(close, 21), lookahead=barmerge.lookahead_off)
-bool htf_bull  = close > ema_1h   // tendencia 1H alcista
-bool htf_bear  = close < ema_1h   // tendencia 1H bajista
+// ══════════════════════════════════════════════════════════════════════════
+// GRUPO: FILTROS DE ENTRADA
+// ══════════════════════════════════════════════════════════════════════════
+gEntrada     = "═══ Filtros de Entrada ═══"
+adxMinInp    = input.int(23,    "ADX mínimo",                       minval=10, maxval=50,   group=gEntrada)
+adxRisingInp = input.bool(false, "Exigir ADX subiendo",             group=gEntrada)
+useHtfInp    = input.bool(true,  "Filtro HTF 1H (solo índices)",    group=gEntrada)
+maxDistInp   = input.float(2.0,  "Distancia máx. a EMA (× ATR)",   minval=0.5, maxval=10.0, step=0.5, group=gEntrada)
 
-// --- IMPULSE MACD ---
-mi = ta.sma(close, 34)
-md = close > mi ? close - ta.lowest(low, 34) : close < mi ? close - ta.highest(high, 34) : 0
-sh = md - ta.sma(md, 9)
+// ══════════════════════════════════════════════════════════════════════════
+// GRUPO: FILTRO RANGO (IMPULSE MACD)
+// ══════════════════════════════════════════════════════════════════════════
+gImacd        = "═══ Filtro Rango (IMACD) ═══"
+useImacd      = input.bool(true,  "Usar Impulse MACD",              group=gImacd)
+imacdPer      = input.int(34,    "Período IMACD",                   minval=5, maxval=200,   group=gImacd)
+imacdSmooth   = input.int(9,     "Suavizado histograma",            minval=1, maxval=50,    group=gImacd)
+imacdThreshPc = input.float(0.3, "Umbral mínimo (× ATR)",           minval=0.0, maxval=3.0, step=0.05, group=gImacd)
 
-// --- VARIABLES ---
-var float t_sl   = na
-var float t_tp   = na
-var float t_ent  = na
-var float t_risk = na  // riesgo inicial fijo (para calcular pasos del trailing)
+// ══════════════════════════════════════════════════════════════════════════
+// GRUPO: SHA (visualización)
+// ══════════════════════════════════════════════════════════════════════════
+gSha   = "═══ Velas SHA ═══"
+shaLen = input.int(10, "Período SHA", minval=3, maxval=50, group=gSha)
 
-// --- LÓGICA DE ENTRADA (PRECISIÓN 51.87) ---
-// Añadido filtro IMACD para evitar entradas laterales
-imacd_threshold = atr * 0.3   // umbral de momentum mínimo
-imacd_filter = math.abs(sh) > imacd_threshold
-impulso_subiendo = sh > 0 and sh > sh[1] and imacd_filter   // histograma positivo y creciendo
-impulso_bajando  = sh < 0 and sh < sh[1] and imacd_filter   // histograma negativo y cayendo
+// ══════════════════════════════════════════════════════════════════════════
+// PARÁMETROS ADAPTATIVOS POR TIPO DE ACTIVO
+// ══════════════════════════════════════════════════════════════════════════
+float atrMult = effSilver ? 0.1 : effGold ? 0.3 : effCrypto ? 0.15 : effIndex ? atrMultInp : 0.6
+float beRR    = effCrypto ? 0.5 : effIndex ? beRRInp : 0.7
+int   adxMin  = effIndex ? math.max(adxMinInp, 28) : adxMinInp
+int   emaPer  = effSilver ? 9 : 21
 
-// Filtro de tendencia EMA 15min
-bool ema_long_ok  = close > emaVal
-bool ema_short_ok = close < emaVal
+// ══════════════════════════════════════════════════════════════════════════
+// INDICADORES
+// ══════════════════════════════════════════════════════════════════════════
+emaVal         = ta.ema(close, emaPer)
+[_, _, adxVal] = ta.dmi(14, 14)
+atrVal         = ta.atr(14)
 
-// --- FILTRO DE PROXIMIDAD A EMA ---
-// Si el precio ya está muy lejos de la EMA, el movimiento está extendido y
-// es muy probable que revierta → no entrar
-// Índice: max 2× ATR desde la EMA; otros activos: 3× ATR
-float max_dist = isIndex ? 2.0 : 3.0
-bool near_ema = math.abs(close - emaVal) < atr * max_dist
+// Filtro ADX
+bool adxOk = adxVal > adxMin and (adxRisingInp ? ta.rising(adxVal, 1) : true)
 
-longC  = strategy.position_size == 0 and impulso_subiendo and high > high[1] and filtro
-          and ema_long_ok
-          and near_ema                          // no perseguir extensiones
-          and (isIndex ? htf_bull : true)       // [MQ5-CRITICAL] 1H alineado alcista
+// Filtro HTF 1 hora
+float ema1h  = request.security(syminfo.tickerid, "60", ta.ema(close, 21), lookahead=barmerge.lookahead_off)
+bool htfBull = close > ema1h
+bool htfBear = close < ema1h
 
-shortC = strategy.position_size == 0 and impulso_bajando  and low  < low[1]  and filtro
-          and ema_short_ok
-          and near_ema                          // no perseguir extensiones
-          and (isIndex ? htf_bear : true)       // [MQ5-CRITICAL] 1H alineado bajista
+// Impulse MACD (filtro de rango — evita mercados laterales)
+imacdMi = ta.sma(close, imacdPer)
+imacdMd = close > imacdMi ? close - ta.lowest(low, imacdPer) : close < imacdMi ? close - ta.highest(high, imacdPer) : 0.0
+imacdSh = imacdMd - ta.sma(imacdMd, imacdSmooth)
 
+float imacdThresh  = atrVal * imacdThreshPc
+bool imacdLongOk  = not useImacd or (imacdSh > 0 and imacdSh > imacdSh[1] and math.abs(imacdSh) > imacdThresh)
+bool imacdShortOk = not useImacd or (imacdSh < 0 and imacdSh < imacdSh[1] and math.abs(imacdSh) > imacdThresh)
+
+// ══════════════════════════════════════════════════════════════════════════
+// FUNCIONES Y LOGICA DE TRAILING (REGLAS.MD)
+// ══════════════════════════════════════════════════════════════════════════
+
+// Calcula el Stop Loss inicial basado en swing y ATR
+calcSL(esLong, refHigh, refLow, atr, mult) =>
+    esLong ? refLow - atr * mult : refHigh + atr * mult
+
+// Calcula el Take Profit basado en riesgo × RR
+calcTP(entrada, slVal, rr) =>
+    float dist = math.abs(entrada - slVal)
+    entrada > slVal ? entrada + dist * rr : entrada - dist * rr
+
+// Calcula el lotaje dinámico basado en riesgo % del capital
+calcLotaje(equity, riskPct, slDist) =>
+    float montoRiesgo = equity * (riskPct / 100.0)
+    float pv          = syminfo.pointvalue
+    pv > 0 and slDist > 0 ? montoRiesgo / (slDist * pv) : 0.0
+
+// Función para actualizar el SL dinámico en LONG (Compra)
+actualizarSlLong(precioHigh, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep, tSl, distSeguimiento) =>
+    float nuevoSl = tSl
+    int nuevoStep = tStep
+    float nuevaDist = distSeguimiento
+    
+    float TP1 = tEnt + tpTercio
+    float TP2 = tEnt + (tpTercio * 2.0)
+    float TP3 = tEnt + tpDist
+    float SL1 = slInicial + slTercio
+    float BE  = tEnt
+    
+    // si el precio >= (TP2 + (TP3/6)) entonces SL = TP3/2 (de aquí en adelante se mueve dinámicamente)
+    if precioHigh >= (TP2 + (tpDist / 6.0))
+        if tStep < 3
+            nuevoStep := 3
+            nuevoSl   := tEnt + (tpDist * 0.5)
+            nuevaDist := precioHigh - nuevoSl
+        else
+            if not na(distSeguimiento)
+                float trailingSl = precioHigh - distSeguimiento
+                if trailingSl > tSl
+                    nuevoSl := trailingSl
+    else if precioHigh >= TP2
+        if tStep < 2
+            nuevoStep := 2
+            nuevoSl   := math.max(tSl, TP1)
+        else
+            nuevoSl   := math.max(tSl, TP1)
+    else if precioHigh >= TP1
+        if tStep < 1
+            nuevoStep := 1
+            nuevoSl   := math.max(tSl, SL1)
+        else
+            nuevoSl   := math.max(tSl, SL1)
+            
+    [nuevoSl, nuevoStep, nuevaDist]
+
+// Función para actualizar el SL dinámico en SHORT (Venta)
+actualizarSlShort(precioLow, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep, tSl, distSeguimiento) =>
+    float nuevoSl = tSl
+    int nuevoStep = tStep
+    float nuevaDist = distSeguimiento
+    
+    float TP1 = tEnt - tpTercio
+    float TP2 = tEnt - (tpTercio * 2.0)
+    float TP3 = tEnt - tpDist
+    float SL1 = slInicial - slTercio
+    float BE  = tEnt
+    
+    // si el precio <= (TP2 - (TP3/6)) entonces SL = TP3/2 (de aquí en adelante se mueve dinámicamente)
+    if precioLow <= (TP2 - (tpDist / 6.0))
+        if tStep < 3
+            nuevoStep := 3
+            nuevoSl   := tEnt - (tpDist * 0.5)
+            nuevaDist := nuevoSl - precioLow
+        else
+            if not na(distSeguimiento)
+                float trailingSl = precioLow + distSeguimiento
+                if trailingSl < tSl
+                    nuevoSl := trailingSl
+    else if precioLow <= TP2
+        if tStep < 2
+            nuevoStep := 2
+            nuevoSl   := math.min(tSl, TP1)
+        else
+            nuevoSl   := math.min(tSl, TP1)
+    else if precioLow <= TP1
+        if tStep < 1
+            nuevoStep := 1
+            nuevoSl   := math.min(tSl, SL1)
+        else
+            nuevoSl   := math.min(tSl, SL1)
+            
+    [nuevoSl, nuevoStep, nuevaDist]
+
+// ══════════════════════════════════════════════════════════════════════════
+// VARIABLES PERSISTENTES
+// ══════════════════════════════════════════════════════════════════════════
+var float tSl             = na  // SL activo (se mueve con el trailing)
+var float tTp             = na  // Take Profit fijo
+var float tEnt            = na  // Precio de entrada
+var float tRisk           = na  // Riesgo inicial: |entrada - SL_inicial|
+var float slInicial       = na
+var float slTercio        = na
+var float tpTercio        = na
+var float distSeguimiento = na
+var int   tStep           = 0   // Paso trailing: 0=inicial, 1=BE, 2=50%TP, 3=punto×punto
+
+// ══════════════════════════════════════════════════════════════════════════
+// CONDICIONES DE ENTRADA CON PROTECCIÓN CONTRARIA
+// ══════════════════════════════════════════════════════════════════════════
+bool inLong  = strategy.position_size > 0
+bool inShort = strategy.position_size < 0
+
+// Si en el instrumento que se está operando hay una operación contraria abierta, no se debe abrir otra contraria
+bool permitLong  = not inShort and strategy.position_size == 0
+bool permitShort = not inLong and strategy.position_size == 0
+
+bool emaLongOk  = close > emaVal
+bool emaShortOk = close < emaVal
+bool nearEma    = math.abs(close - emaVal) < atrVal * maxDistInp
+bool htfLongOk  = not (effIndex and useHtfInp) or htfBull
+bool htfShortOk = not (effIndex and useHtfInp) or htfBear
+
+bool longC  = permitLong  and imacdLongOk  and high > high[1] and adxOk and emaLongOk  and nearEma and htfLongOk
+bool shortC = permitShort and imacdShortOk and low  < low[1]  and adxOk and emaShortOk and nearEma and htfShortOk
+
+// ══════════════════════════════════════════════════════════════════════════
+// SEÑALES DE ENTRADA
+// ══════════════════════════════════════════════════════════════════════════
 if longC
-    t_ent  := close
-    t_sl   := low[1] - (atr * atr_mult)
-    t_tp   := close + (math.abs(close - t_sl) * minRR)
-    t_risk := math.abs(close - t_sl)  // guardar riesgo inicial
+    tEnt            := close
+    slInicial       := calcSL(true, high[1], low[1], atrVal, atrMult)
+    tSl             := slInicial
+    tTp             := calcTP(tEnt, tSl, minRR)
+    tRisk           := math.abs(tEnt - tSl)
+    slTercio        := tRisk / 3.0
+    tpTercio        := math.abs(tTp - tEnt) / 3.0
+    distSeguimiento := na
+    tStep           := 0
     strategy.entry("L", strategy.long)
-    label.new(bar_index, low, "COMPRA", color=color.green, textcolor=color.white, style=label.style_label_up, size=size.small)
-    box.new(bar_index, t_tp, bar_index + 10, close, bgcolor=color.new(color.green, 55), border_color=na)
-    box.new(bar_index, close, bar_index + 10, t_sl, bgcolor=color.new(color.red, 55), border_color=na)
+    label.new(bar_index, low,  "▲ COMPRA", color=color.green, textcolor=color.white, style=label.style_label_up,   size=size.small)
+    box.new(bar_index, tTp,  bar_index + 10, tEnt, bgcolor=color.new(color.green, 55), border_color=na)
+    box.new(bar_index, tEnt, bar_index + 10, tSl,  bgcolor=color.new(color.red,   55), border_color=na)
 
 if shortC
-    t_ent  := close
-    t_sl   := high[1] + (atr * atr_mult)
-    t_tp   := close - (math.abs(close - t_sl) * minRR)
-    t_risk := math.abs(close - t_sl)  // guardar riesgo inicial
+    tEnt            := close
+    slInicial       := calcSL(false, high[1], low[1], atrVal, atrMult)
+    tSl             := slInicial
+    tTp             := calcTP(tEnt, tSl, minRR)
+    tRisk           := math.abs(tEnt - tSl)
+    slTercio        := tRisk / 3.0
+    tpTercio        := math.abs(tTp - tEnt) / 3.0
+    distSeguimiento := na
+    tStep           := 0
     strategy.entry("S", strategy.short)
-    label.new(bar_index, high, "VENTA", color=color.red, textcolor=color.white, style=label.style_label_down, size=size.small)
-    box.new(bar_index, close, bar_index + 10, t_tp, bgcolor=color.new(#4caf4f, 55), border_color=na)
-    box.new(bar_index, t_sl, bar_index + 10, close, bgcolor=color.new(#ff5252, 55), border_color=na)
+    label.new(bar_index, high, "▼ VENTA",  color=color.red,   textcolor=color.white, style=label.style_label_down, size=size.small)
+    box.new(bar_index, tEnt, bar_index + 10, tTp,  bgcolor=color.new(color.green, 55), border_color=na)
+    box.new(bar_index, tSl,  bar_index + 10, tEnt, bgcolor=color.new(color.red,   55), border_color=na)
 
-// --- GESTIÓN DE RIESGO ---
-if strategy.position_size != 0
-    float trail = t_risk / 3.0
+// ══════════════════════════════════════════════════════════════════════════
+// TRAILING STOP POR TERCIOS (REGLAS.MD)
+// ══════════════════════════════════════════════════════════════════════════
+bool trailMoved = false
 
-    if strategy.position_size > 0 and not na(trail)
-        // BE inmediato: si precio avanza >= beRR*riesgo, SL salta a entrada de golpe
-        // Esto captura el regreso rápido antes de que el trail por tercios alcance BE
-        if high >= t_ent + t_risk * beRR
-            t_sl := math.max(t_sl, t_ent)
-        // Trail por tercios: sigue subiendo después del BE
-        float steps = math.max(0.0, math.floor((high - t_ent) / trail))
-        t_sl := math.max(t_sl, (t_ent - t_risk) + steps * trail)
+if strategy.position_size != 0 and not na(tRisk) and not na(tTp)
+    float tpDist = math.abs(tTp - tEnt)
 
-    if strategy.position_size < 0 and not na(trail)
-        // BE inmediato al bajar >= beRR*riesgo
-        if low <= t_ent - t_risk * beRR
-            t_sl := math.min(t_sl, t_ent)
-        // Trail por tercios hacia abajo
-        float steps = math.max(0.0, math.floor((t_ent - low) / trail))
-        t_sl := math.min(t_sl, (t_ent + t_risk) - steps * trail)
+    if strategy.position_size > 0
+        // Actualización LONG
+        float viejoSl = tSl
+        [nuevoSl, nuevoStep, nuevaDist] = actualizarSlLong(high, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep, tSl, distSeguimiento)
+        tSl             := nuevoSl
+        tStep           := nuevoStep
+        distSeguimiento := nuevaDist
+        if tSl != viejoSl
+            trailMoved := true
 
-    strategy.exit("Exit", stop=t_sl, limit=t_tp)
-    // Dibujar SL trailing en naranja
-    var line sl_trail_line = na
-    if strategy.position_size != 0
-        if na(sl_trail_line)
-            sl_trail_line := line.new(bar_index, t_sl, bar_index + 10, t_sl, color=color.orange, width=2)
-        else
-            line.set_xy1(sl_trail_line, bar_index, t_sl)
-            line.set_xy2(sl_trail_line, bar_index + 10, t_sl)
-    else
-        if not na(sl_trail_line)
-            line.delete(sl_trail_line)
-            sl_trail_line := na
+    if strategy.position_size < 0
+        // Actualización SHORT
+        float viejoSl = tSl
+        [nuevoSl, nuevoStep, nuevaDist] = actualizarSlShort(low, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep, tSl, distSeguimiento)
+        tSl             := nuevoSl
+        tStep           := nuevoStep
+        distSeguimiento := nuevaDist
+        if tSl != viejoSl
+            trailMoved := true
 
-// --- VISUALIZACIÓN LIGERA (SHA) ---
-sha_len = 10
-s_o = ta.ema(open, sha_len), s_c = ta.ema(close, sha_len)
-var float sha_open = na
-sha_close = (s_o + ta.ema(high, sha_len) + ta.ema(low, sha_len) + s_c) / 4
-sha_open := na(sha_open) ? (s_o + s_c) / 2 : (sha_open + sha_close) / 2
-f_o = ta.ema(sha_open, sha_len), f_c = ta.ema(sha_close, sha_len)
+    strategy.exit("Exit", stop=tSl, limit=tTp)
 
-plotcandle(f_o, f_c, f_c, f_o, "SHA", color = f_c > f_o ? color.new(color.green, 90) : color.new(color.red, 90), bordercolor=na)
-plot(emaVal, "EMA Adaptativa", color=color.new(#0a46ea, 35), linewidth=2)
+// ══════════════════════════════════════════════════════════════════════════
+// INDICADOR DE CALIDAD (bgcolor)
+// Verde  → condiciones alineadas alcistas (todo apunta a compra)
+// Rojo   → condiciones alineadas bajistas (todo apunta a venta)
+// Gris   → sin dirección clara (lateral / sin filtros)
+// ══════════════════════════════════════════════════════════════════════════
+bool qualBull = adxOk and imacdLongOk  and emaLongOk  and nearEma
+bool qualBear = adxOk and imacdShortOk and emaShortOk and nearEma
+color qualColor = qualBull ? color.new(color.green, 92) : qualBear ? color.new(color.red, 92) : color.new(color.gray, 98)
+bgcolor(qualColor, title="Indicador de Calidad")
+
+// ══════════════════════════════════════════════════════════════════════════
+// VISUALIZACIÓN
+// ══════════════════════════════════════════════════════════════════════════
+// Velas Heikin-Ashi suavizadas (SHA)
+sO = ta.ema(open,  shaLen)
+sC = ta.ema(close, shaLen)
+var float shaOpenVal = na
+shaCloseVal  = (sO + ta.ema(high, shaLen) + ta.ema(low, shaLen) + sC) / 4.0
+shaOpenVal  := na(shaOpenVal) ? (sO + sC) / 2.0 : (shaOpenVal + shaCloseVal) / 2.0
+fO = ta.ema(shaOpenVal,  shaLen)
+fC = ta.ema(shaCloseVal, shaLen)
+
+plotcandle(fO, fC, fC, fO, "SHA",
+           color       = fC > fO ? color.new(color.green, 90) : color.new(color.red, 90),
+           bordercolor = na)
+plot(emaVal, "EMA Adaptativa",  color=color.new(#0a46ea, 35), linewidth=2)
+plot(strategy.position_size != 0 ? tSl : na, "Stop Loss activo", color=color.orange, linewidth=2, style=plot.style_linebr)
+plot(strategy.position_size != 0 ? tTp : na, "Take Profit",      color=color.lime,   linewidth=1, style=plot.style_linebr, linestyle=plot.linestyle_dashed)
+
+// Señales de entrada
+plotshape(longC,  title="Señal LONG",  location=location.belowbar, style=shape.triangleup,   color=color.new(color.green, 0), size=size.small)
+plotshape(shortC, title="Señal SHORT", location=location.abovebar, style=shape.triangledown, color=color.new(color.red,   0), size=size.small)
+
+// Señales de trailing (círculo naranja cuando se mueve el SL)
+plotshape(trailMoved and strategy.position_size > 0, title="Trail LONG",  location=location.belowbar, style=shape.circle, color=color.orange, size=size.tiny)
+plotshape(trailMoved and strategy.position_size < 0, title="Trail SHORT", location=location.abovebar, style=shape.circle, color=color.orange, size=size.tiny)
+
+// ══════════════════════════════════════════════════════════════════════════
+// TABLA DE ESTADO
+// ══════════════════════════════════════════════════════════════════════════
+var table panel = table.new(position.top_right, 2, 7,
+                            bgcolor=color.new(color.black, 20),
+                            border_width=1, border_color=color.gray)
+if barstate.islast
+    string dir      = strategy.position_size > 0 ? "🟢 LONG" : strategy.position_size < 0 ? "🔴 SHORT" : "⬜ FLAT"
+    string trailTxt = tStep == 0 ? "Esperando" : tStep == 1 ? "BE ✓" : tStep == 2 ? "50% TP ✓" : "Punto×Punto ✓"
+    string tipoAct  = effSilver ? "🥈 Plata" : effGold ? "🥇 Oro" : effCrypto ? "₿ Crypto" : effIndex ? "📈 Índice" : effForex ? "💱 Forex" : "Otro"
+    string imacdTxt = not useImacd ? "OFF" : imacdSh > 0 ? "▲ Alcista" : imacdSh < 0 ? "▼ Bajista" : "─ Rango"
+    color  imacdCol = not useImacd ? color.gray : imacdSh > 0 ? color.green : imacdSh < 0 ? color.red : color.orange
+
+    table.cell(panel, 0, 0, "Sniper + SHA v2", text_color=color.yellow, text_size=size.small)
+    table.cell(panel, 1, 0, "Magic:" + str.tostring(magicNum), text_color=color.gray, text_size=size.tiny)
+    table.cell(panel, 0, 1, "Activo",   text_color=color.white,  text_size=size.small)
+    table.cell(panel, 1, 1, tipoAct,    text_color=color.yellow, text_size=size.small)
+    table.cell(panel, 0, 2, "Posición", text_color=color.white,  text_size=size.small)
+    table.cell(panel, 1, 2, dir,        text_color=color.white,  text_size=size.small)
+    table.cell(panel, 0, 3, "Trailing", text_color=color.white,  text_size=size.small)
+    table.cell(panel, 1, 3, trailTxt,   text_color=color.orange, text_size=size.small)
+    table.cell(panel, 0, 4, "IMACD",    text_color=color.white,  text_size=size.small)
+    table.cell(panel, 1, 4, imacdTxt,   text_color=imacdCol,     text_size=size.small)
+    table.cell(panel, 0, 5, "ADX",      text_color=color.white,  text_size=size.small)
+    table.cell(panel, 1, 5, str.tostring(math.round(adxVal, 1)) + (adxOk ? " ✓" : " ✗"), text_color=adxOk ? color.green : color.red, text_size=size.small)
+    table.cell(panel, 0, 6, "Capital",  text_color=color.white,  text_size=size.small)
+    table.cell(panel, 1, 6, "$" + str.tostring(strategy.equity, "#.##"), text_color=color.green, text_size=size.small)
