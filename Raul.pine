@@ -105,6 +105,7 @@ calcLotaje(equity, riskPct, slDist) =>
 
 // Variables persistentes
 var float tSl     = na
+var float tTp     = na
 var float tEnt    = na
 var float tRisk   = na
 var float maxHigh = na
@@ -113,21 +114,25 @@ var float minLow  = na
 if longC
     tEnt    := close
     tSl     := calcSL(true, rangoMin, rangoMax, slBuffer)
+    tTp     := tEnt + (trailPts * syminfo.mintick)
     tRisk   := math.abs(tEnt - tSl)
     maxHigh := high
     float lote = calcLotaje(strategy.equity, riesgoPct, tRisk)
     strategy.entry("L", strategy.long, qty=lote)
     label.new(bar_index, low, "▲ RAUL COMPRA", color=color.green, textcolor=color.white, style=label.style_label_up, size=size.small)
+    box.new(bar_index, tTp, bar_index + 15, tEnt, bgcolor=color.new(color.green, 55), border_color=na)
     box.new(bar_index, tEnt, bar_index + 15, tSl, bgcolor=color.new(color.red, 55), border_color=na)
 
 if shortC
     tEnt    := close
     tSl     := calcSL(false, rangoMin, rangoMax, slBuffer)
+    tTp     := tEnt - (trailPts * syminfo.mintick)
     tRisk   := math.abs(tEnt - tSl)
     minLow  := low
     float lote = calcLotaje(strategy.equity, riesgoPct, tRisk)
     strategy.entry("S", strategy.short, qty=lote)
     label.new(bar_index, high, "▼ RAUL VENTA", color=color.red, textcolor=color.white, style=label.style_label_down, size=size.small)
+    box.new(bar_index, tEnt, bar_index + 15, tTp, bgcolor=color.new(color.green, 55), border_color=na)
     box.new(bar_index, tSl, bar_index + 15, tEnt, bgcolor=color.new(color.red, 55), border_color=na)
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -156,6 +161,7 @@ if strategy.position_size != 0
 // Reset al cerrar posición (se retrasa una barra para que la visualización del histórico dibuje la barra de cierre)
 if strategy.position_size == 0 and strategy.position_size[1] == 0
     tSl     := na
+    tTp     := na
     tEnt    := na
     tRisk   := na
     maxHigh := na
@@ -171,6 +177,7 @@ bool exitShort = (strategy.position_size[1] < 0 and strategy.position_size == 0)
 bool inPosition = (strategy.position_size != 0) or (strategy.position_size[1] != 0)
 
 plot(inPosition ? tSl : na, "SL Trailing Activo", color=color.orange, linewidth=2, style=plot.style_linebr)
+plot(inPosition ? tTp : na, "Take Profit Objetivo", color=color.lime, linewidth=1, style=plot.style_linebr, linestyle=plot.linestyle_dashed)
 plot(inPosition ? tEnt : na, "Precio Entrada", color=color.blue, linewidth=1, style=plot.style_linebr, linestyle=plot.linestyle_dashed)
 
 // Dibuja un punto rojo/círculo en el gráfico en el precio exacto de salida histórica (tSl de la barra anterior)
