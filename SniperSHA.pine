@@ -37,12 +37,13 @@ marketType = input.string("auto", "Tipo de activo",
              tooltip="'auto' detecta el instrumento automáticamente",
              group=gActivo)
 
-// Detección automática
-bool isSilver = str.contains(syminfo.ticker, "XAG") or str.contains(syminfo.ticker, "SILVER")
-bool isGold   = str.contains(syminfo.ticker, "XAU") or str.contains(syminfo.ticker, "GOLD")
+// Detección automática (robusta frente al idioma del broker)
+string tickerLower = str.lower(syminfo.ticker)
+bool isSilver = str.contains(tickerLower, "xag") or str.contains(tickerLower, "silver") or str.contains(tickerLower, "plata")
+bool isGold   = str.contains(tickerLower, "xau") or str.contains(tickerLower, "gold")   or str.contains(tickerLower, "oro")
 bool isCrypto = syminfo.type == "crypto"
 bool isForex  = syminfo.type == "forex"
-bool isIndex  = str.contains(syminfo.ticker, "NAS") or str.contains(syminfo.ticker, "US100") or str.contains(syminfo.ticker, "US30") or str.contains(syminfo.ticker, "US500") or str.contains(syminfo.ticker, "SPX") or str.contains(syminfo.ticker, "DAX") or str.contains(syminfo.ticker, "FTSE") or syminfo.type == "index"
+bool isIndex  = str.contains(tickerLower, "nas") or str.contains(tickerLower, "us100") or str.contains(tickerLower, "us30") or str.contains(tickerLower, "us500") or str.contains(tickerLower, "spx") or str.contains(tickerLower, "dax") or str.contains(tickerLower, "ftse") or syminfo.type == "index"
 
 // Tipo efectivo (override manual tiene prioridad)
 bool effSilver = marketType == "plata"  or (marketType == "auto" and isSilver)
@@ -54,11 +55,12 @@ bool effForex  = marketType == "forex"  or (marketType == "auto" and isForex)
 // ══════════════════════════════════════════════════════════════════════════
 // GRUPO: GESTIÓN DE RIESGO
 // ══════════════════════════════════════════════════════════════════════════
-gRiesgo    = "═══ Gestión de Riesgo ═══"
-riesgoPct  = input.float(1.0,  "Riesgo por operación (%)",         minval=0.1, maxval=10.0, step=0.1,  group=gRiesgo)
-minRR      = input.float(1.2,  "RR mínimo (TP/SL)",                minval=0.5, maxval=5.0,  step=0.1,  group=gRiesgo)
-atrMultInp = input.float(0.5,  "Multiplicador ATR para SL",        minval=0.05, maxval=3.0, step=0.05, group=gRiesgo)
-beRRInp    = input.float(0.4,  "Break-even trigger (× riesgo)",    minval=0.1, maxval=1.0,  step=0.05, group=gRiesgo, tooltip="SL sube a entrada cuando precio avanza esta fracción del riesgo inicial")
+gRiesgo      = "═══ Gestión de Riesgo ═══"
+riesgoPct    = input.float(1.0,  "Riesgo por operación (%)",         minval=0.1, maxval=10.0, step=0.1,  group=gRiesgo)
+minRR        = input.float(1.2,  "RR mínimo (TP/SL)",                minval=0.5, maxval=5.0,  step=0.1,  group=gRiesgo)
+atrMultInp   = input.float(0.5,  "Multiplicador ATR para SL",        minval=0.05, maxval=3.0, step=0.05, group=gRiesgo)
+beRRInp      = input.float(0.4,  "Break-even trigger (× riesgo)",    minval=0.1, maxval=1.0,  step=0.05, group=gRiesgo, tooltip="SL sube a entrada cuando precio avanza esta fracción del riesgo inicial")
+cooldownBars = input.int(8,      "Velas de enfriamiento (cooldown)", minval=0, group=gRiesgo, tooltip="Número de velas a esperar para volver a entrar tras cerrar una posición")
 
 // ══════════════════════════════════════════════════════════════════════════
 // GRUPO: FILTROS DE ENTRADA
@@ -240,14 +242,22 @@ var float distSeguimiento = na
 var int   tStep           = 0   // Paso trailing: 0=inicial, 1=BE, 2=50%TP, 3=punto×punto
 
 // ══════════════════════════════════════════════════════════════════════════
-// CONDICIONES DE ENTRADA CON PROTECCIÓN CONTRARIA
+// CONDICIONES DE ENTRADA CON PROTECCIÓN CONTRARIA Y ENFRIAMIENTO (COOLDOWN)
 // ══════════════════════════════════════════════════════════════════════════
 bool inLong  = strategy.position_size > 0
 bool inShort = strategy.position_size < 0
 
+// Enfriamiento tras el cierre de una posición
+bool posClosed = (strategy.position_size[1] != 0 and strategy.position_size == 0)
+var int ultimoCierreBar = -999
+if posClosed
+    ultimoCierreBar := bar_index
+
+bool cooldownOk = (bar_index - ultimoCierreBar) >= cooldownBars
+
 // Si en el instrumento que se está operando hay una operación contraria abierta, no se debe abrir otra contraria
-bool permitLong  = not inShort and strategy.position_size == 0
-bool permitShort = not inLong and strategy.position_size == 0
+bool permitLong  = not inShort and strategy.position_size == 0 and cooldownOk
+bool permitShort = not inLong and strategy.position_size == 0 and cooldownOk
 
 bool emaLongOk  = close > emaVal
 bool emaShortOk = close < emaVal
