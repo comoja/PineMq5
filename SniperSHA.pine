@@ -212,6 +212,20 @@ actualizarSlShort(precioLow, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep,
     [nuevoSl, nuevoStep, nuevaDist]
 
 // ══════════════════════════════════════════════════════════════════════════
+// VELAS HEIKIN-ASHI SUAVIZADAS (SHA)
+// ══════════════════════════════════════════════════════════════════════════
+sO = ta.ema(open,  shaLen)
+sC = ta.ema(close, shaLen)
+var float shaOpenVal = na
+shaCloseVal  = (sO + ta.ema(high, shaLen) + ta.ema(low, shaLen) + sC) / 4.0
+shaOpenVal  := na(shaOpenVal) ? (sO + sC) / 2.0 : (shaOpenVal + shaCloseVal) / 2.0
+fO = ta.ema(shaOpenVal,  shaLen)
+fC = ta.ema(shaCloseVal, shaLen)
+
+bool shaGreen = fC > fO
+bool shaRed   = fC < fO
+
+// ══════════════════════════════════════════════════════════════════════════
 // VARIABLES PERSISTENTES
 // ══════════════════════════════════════════════════════════════════════════
 var float tSl             = na  // SL activo (se mueve con el trailing)
@@ -240,8 +254,8 @@ bool nearEma    = math.abs(close - emaVal) < atrVal * maxDistInp
 bool htfLongOk  = not (effIndex and useHtfInp) or htfBull
 bool htfShortOk = not (effIndex and useHtfInp) or htfBear
 
-bool longC  = permitLong  and imacdLongOk  and high > high[1] and adxOk and emaLongOk  and nearEma and htfLongOk
-bool shortC = permitShort and imacdShortOk and low  < low[1]  and adxOk and emaShortOk and nearEma and htfShortOk
+bool longC  = permitLong  and imacdLongOk  and high > high[1] and adxOk and emaLongOk  and nearEma and htfLongOk and shaGreen
+bool shortC = permitShort and imacdShortOk and low  < low[1]  and adxOk and emaShortOk and nearEma and htfShortOk and shaRed
 
 // ══════════════════════════════════════════════════════════════════════════
 // SEÑALES DE ENTRADA
@@ -312,23 +326,14 @@ if strategy.position_size != 0 and not na(tRisk) and not na(tTp)
 // Rojo   → condiciones alineadas bajistas (todo apunta a venta)
 // Gris   → sin dirección clara (lateral / sin filtros)
 // ══════════════════════════════════════════════════════════════════════════
-bool qualBull = adxOk and imacdLongOk  and emaLongOk  and nearEma
-bool qualBear = adxOk and imacdShortOk and emaShortOk and nearEma
+bool qualBull = adxOk and imacdLongOk  and emaLongOk  and nearEma and shaGreen
+bool qualBear = adxOk and imacdShortOk and emaShortOk and nearEma and shaRed
 color qualColor = qualBull ? color.new(color.green, 92) : qualBear ? color.new(color.red, 92) : color.new(color.gray, 98)
 bgcolor(qualColor, title="Indicador de Calidad")
 
 // ══════════════════════════════════════════════════════════════════════════
 // VISUALIZACIÓN
 // ══════════════════════════════════════════════════════════════════════════
-// Velas Heikin-Ashi suavizadas (SHA)
-sO = ta.ema(open,  shaLen)
-sC = ta.ema(close, shaLen)
-var float shaOpenVal = na
-shaCloseVal  = (sO + ta.ema(high, shaLen) + ta.ema(low, shaLen) + sC) / 4.0
-shaOpenVal  := na(shaOpenVal) ? (sO + sC) / 2.0 : (shaOpenVal + shaCloseVal) / 2.0
-fO = ta.ema(shaOpenVal,  shaLen)
-fC = ta.ema(shaCloseVal, shaLen)
-
 plotcandle(fO, fC, fC, fO, "SHA",
            color       = fC > fO ? color.new(color.green, 90) : color.new(color.red, 90),
            bordercolor = na)
