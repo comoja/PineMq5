@@ -74,8 +74,8 @@ atr_min_usd   = input.float(2.0,  "ATR Mínimo en USD (15m)",          minval=0.
 use_adx       = input.bool(true, "Filtro ADX (Tendencia)", group=gp_gold,
                  tooltip="ACTIVADO: reduce trades a solo mercados trending. Factor mejora de 1.1 a 2.6")
 adx_len       = input.int(14,   "Período ADX", minval=1, group=gp_gold)
-adx_min       = input.float(18.0, "ADX Mínimo", minval=5.0, step=1.0, group=gp_gold,
-                 tooltip="18+ = tendencia naciente. Bajo 18 = rango puro")
+adx_min       = input.float(22.0, "ADX Mínimo", minval=5.0, step=1.0, group=gp_gold,
+                 tooltip="22+ = tendencia definida. Bajo 22 = consolidación o rango lateral")
 
 // Filtro RSI: evitar entradas en extremos de sobrecompra/sobreventa
 use_rsi       = input.bool(false, "Filtro RSI (Evitar Extremos)", group=gp_gold,
