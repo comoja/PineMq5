@@ -160,19 +160,29 @@ if strategy.position_size < 0
 if strategy.position_size != 0
     strategy.exit("Exit", stop=tSl)
 
-// Reset al cerrar posición
-if strategy.position_size == 0
+// Reset al cerrar posición (se retrasa una barra para que la visualización del histórico dibuje la barra de cierre)
+if strategy.position_size == 0 and strategy.position_size[1] == 0
     tSl     := na
     tEnt    := na
     tRisk   := na
     maxHigh := na
     minLow  := na
 
+// Detectar cierres de posiciones (salidas)
+bool exitLong  = (strategy.position_size[1] > 0 and strategy.position_size == 0)
+bool exitShort = (strategy.position_size[1] < 0 and strategy.position_size == 0)
+
 // ══════════════════════════════════════════════════════════════════════════
-// DIBUJAR ENTRADA Y SL TRAILING
+// DIBUJAR ENTRADA, SL TRAILING Y SALIDAS EN EL HISTÓRICO
 // ══════════════════════════════════════════════════════════════════════════
-plot(strategy.position_size != 0 ? tSl : na, "SL Trailing Activo", color=color.orange, linewidth=2, style=plot.style_linebr)
-plot(strategy.position_size != 0 ? tEnt : na, "Precio Entrada", color=color.blue, linewidth=1, style=plot.style_linebr, linestyle=plot.linestyle_dashed)
+bool inPosition = (strategy.position_size != 0) or (strategy.position_size[1] != 0)
+
+plot(inPosition ? tSl : na, "SL Trailing Activo", color=color.orange, linewidth=2, style=plot.style_linebr)
+plot(inPosition ? tEnt : na, "Precio Entrada", color=color.blue, linewidth=1, style=plot.style_linebr, linestyle=plot.linestyle_dashed)
+
+// Dibuja un punto rojo/círculo en el gráfico en el precio exacto de salida histórica (tSl de la barra anterior)
+plot(exitLong or exitShort ? tSl[1] : na, "Punto de Salida Real", color=color.red, style=plot.style_circles, linewidth=4)
+plotshape(exitLong or exitShort, title="Etiqueta Salida", style=shape.xcross, location=location.abovebar, color=color.red, size=size.tiny, text="SALIDA", textcolor=color.red)
 
 // ══════════════════════════════════════════════════════════════════════════
 // INDICADOR DE CALIDAD (bgcolor)
