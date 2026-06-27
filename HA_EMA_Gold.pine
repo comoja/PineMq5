@@ -71,11 +71,17 @@ atr_min_usd   = input.float(2.0,  "ATR Mínimo en USD (15m)",          minval=0.
                  tooltip="El Oro típico en 15m: 2-8 USD. Bajo 2 → mercado dormido")
 
 // Filtro ADX: solo entrar en mercado con tendencia definida
-use_adx       = input.bool(true, "Filtro ADX (Tendencia)", group=gp_gold,
+use_adx       = input.bool(false, "Filtro ADX (Tendencia)", group=gp_gold,
                  tooltip="ACTIVADO: reduce trades a solo mercados trending. Factor mejora de 1.1 a 2.6")
 adx_len       = input.int(14,   "Período ADX", minval=1, group=gp_gold)
 adx_min       = input.float(22.0, "ADX Mínimo", minval=5.0, step=1.0, group=gp_gold,
                  tooltip="22+ = tendencia definida. Bajo 22 = consolidación o rango lateral")
+
+// Filtro Abertura EMAs (Evita Rangos Laterales/Consolidaciones)
+use_ema_spread  = input.bool(true, "Usar Filtro Abertura EMAs", group=gp_gold,
+                  tooltip="ACTIVADO: evita operar si las EMAs están muy pegadas (rango lateral).")
+ema_spread_mult = input.float(0.4, "Separación Mínima EMAs (× ATR)", minval=0.0, step=0.1, group=gp_gold,
+                  tooltip="0.4 = exige que las EMAs estén separadas por al menos el 40% del ATR para autorizar el trade.")
 
 // Filtro RSI: evitar entradas en extremos de sobrecompra/sobreventa
 use_rsi       = input.bool(false, "Filtro RSI (Evitar Extremos)", group=gp_gold,
@@ -147,6 +153,10 @@ atr_ok   = not use_atr_min or (atr_val >= atr_min_usd)
 [adx_val, di_plus, di_minus] = ta.dmi(adx_len, adx_len)
 adx_ok = not use_adx or (adx_val >= adx_min)
 
+// --- FILTRO ABERTURA EMAs ---
+distancia_emas = math.abs(ema_fast - ema_slow)
+abertura_ok    = not use_ema_spread or (distancia_emas >= (ta.atr(14) * ema_spread_mult))
+
 // --- FILTRO RSI ---
 rsi_val      = ta.rsi(close, rsi_len)
 rsi_long_ok  = not use_rsi or (rsi_val < rsi_ob)
@@ -188,12 +198,12 @@ ha_strength_short = not use_ha_strength or (haHigh == haOpen)
 is_long_aligned  = (ema_fast > ema_slow) and ha_green and
                    imacd_long_ok  and ema200_long_ok  and ha_strength_long  and
                    htf_long_ok    and in_session       and atr_ok            and
-                   adx_ok         and rsi_long_ok
+                   adx_ok         and rsi_long_ok      and abertura_ok
 
 is_short_aligned = (ema_fast < ema_slow) and ha_red and
                    imacd_short_ok and ema200_short_ok and ha_strength_short and
                    htf_short_ok   and in_session       and atr_ok            and
-                   adx_ok         and rsi_short_ok
+                   adx_ok         and rsi_short_ok     and abertura_ok
 
 // Contador de velas consecutivas alineadas (sin for-loop para evitar problemas de scoping en Pine v6)
 var int long_count  = 0
