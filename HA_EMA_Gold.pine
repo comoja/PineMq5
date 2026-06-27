@@ -127,12 +127,8 @@ plotcandle(haOpen, haHigh, haLow, haClose,
 string resolved_tf = ema_tf_input
 if ema_tf_input == "Auto"
     if timeframe.isminutes
-        if timeframe.multiplier <= 5
-            resolved_tf := "30"
-        else if timeframe.multiplier <= 15
+        if timeframe.multiplier <= 180
             resolved_tf := "180"
-        else if timeframe.multiplier <= 60
-            resolved_tf := "240"
         else
             resolved_tf := "1440"
     else if timeframe.isdaily
