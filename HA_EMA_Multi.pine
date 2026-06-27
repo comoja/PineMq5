@@ -347,7 +347,7 @@ plot(strategy.position_size != 0 ? active_sl : na, "Stop Loss",   color=color.re
 plot(strategy.position_size != 0 and use_tp ? active_tp : na, "Take Profit", color=color.green, style=plot.style_linebr, linewidth=2)
 
 // Tabla de estadísticas
-var table main_table = table.new(position.top_right, 2, 9,
+var table main_table = table.new(position.top_right, 2, 10,
      bgcolor=color.new(color.black, 15), border_width=1, border_color=color.gray)
 
 if barstate.islast
@@ -356,6 +356,7 @@ if barstate.islast
     atr_display = str.tostring(table_atr, "#.##") + " USD"
     
     profile_name = is_gold ? "ORO (Auto)" : is_silver ? "PLATA (Auto)" : "MANUAL"
+    tf_sugerido  = is_gold ? "1h" : is_silver ? "30m" : "-"
     display_tf   = resolved_tf == "180" ? "3h" : resolved_tf == "240" ? "4h" : resolved_tf == "60" ? "1h" : resolved_tf == "30" ? "30m" : resolved_tf == "1440" ? "1d" : resolved_tf
     imacd_status = not use_imacd ? "DESACTIVADO" : md == 0.0 ? "RANGO" : md > 0.0 ? "ALCISTA" : "BAJISTA"
     imacd_color  = not use_imacd ? color.gray   : md == 0.0 ? color.orange : md > 0.0 ? color.green : color.red
@@ -366,27 +367,30 @@ if barstate.islast
     table.cell(main_table, 0, 1, "Perfil:",      text_color=color.white,  text_size=size.small)
     table.cell(main_table, 1, 1, profile_name,   text_color=color.yellow, text_size=size.small)
 
-    table.cell(main_table, 0, 2, "Estado:",       text_color=color.white, text_size=size.small)
-    table.cell(main_table, 1, 2, in_trade ? "DENTRO" : "BUSCANDO",
+    table.cell(main_table, 0, 2, "TF Sugerido:",  text_color=color.white,  text_size=size.small)
+    table.cell(main_table, 1, 2, tf_sugerido,     text_color=color.yellow, text_size=size.small)
+
+    table.cell(main_table, 0, 3, "Estado:",       text_color=color.white, text_size=size.small)
+    table.cell(main_table, 1, 3, in_trade ? "DENTRO" : "BUSCANDO",
                text_color=in_trade ? color.green : color.yellow, text_size=size.small)
 
-    table.cell(main_table, 0, 3, "Sesión:",       text_color=color.white, text_size=size.small)
-    table.cell(main_table, 1, 3, in_session ? "ACTIVA" : "CERRADA",
+    table.cell(main_table, 0, 4, "Sesión:",       text_color=color.white, text_size=size.small)
+    table.cell(main_table, 1, 4, in_session ? "ACTIVA" : "CERRADA",
                text_color=in_session ? color.green : color.gray, text_size=size.small)
 
-    table.cell(main_table, 0, 4, "ATR (" + timeframe.period + "):", text_color=color.white, text_size=size.small)
-    table.cell(main_table, 1, 4, atr_display,     text_color=color.green, text_size=size.small)
+    table.cell(main_table, 0, 5, "ATR (" + timeframe.period + "):", text_color=color.white, text_size=size.small)
+    table.cell(main_table, 1, 5, atr_display,     text_color=color.green, text_size=size.small)
 
-    table.cell(main_table, 0, 5, "TF EMAs:",       text_color=color.white, text_size=size.small)
-    table.cell(main_table, 1, 5, display_tf,       text_color=color.yellow, text_size=size.small)
+    table.cell(main_table, 0, 6, "TF EMAs:",       text_color=color.white, text_size=size.small)
+    table.cell(main_table, 1, 6, display_tf,       text_color=color.yellow, text_size=size.small)
 
-    table.cell(main_table, 0, 6, "iMACD:",        text_color=color.white, text_size=size.small)
-    table.cell(main_table, 1, 6, imacd_status,    text_color=imacd_color, text_size=size.small)
+    table.cell(main_table, 0, 7, "iMACD:",        text_color=color.white, text_size=size.small)
+    table.cell(main_table, 1, 7, imacd_status,    text_color=imacd_color, text_size=size.small)
 
-    table.cell(main_table, 0, 7, "Equidad:",      text_color=color.white, text_size=size.small)
-    table.cell(main_table, 1, 7, "$" + str.tostring(strategy.equity, "#.##"),
+    table.cell(main_table, 0, 8, "Equidad:",      text_color=color.white, text_size=size.small)
+    table.cell(main_table, 1, 8, "$" + str.tostring(strategy.equity, "#.##"),
                text_color=color.green, text_size=size.small)
 
-    table.cell(main_table, 0, 8, "Rendimiento:",  text_color=color.white, text_size=size.small)
-    table.cell(main_table, 1, 8, str.tostring(strategy.netprofit, "#.##") + " USD",
+    table.cell(main_table, 0, 9, "Rendimiento:",  text_color=color.white, text_size=size.small)
+    table.cell(main_table, 1, 9, str.tostring(strategy.netprofit, "#.##") + " USD",
                text_color=strategy.netprofit >= 0 ? color.green : color.red, text_size=size.small)
