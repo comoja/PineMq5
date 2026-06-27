@@ -158,7 +158,7 @@ int OnInit()
    
    m_use_ha_strength = m_is_gold ? false : m_is_silver ? true  : InpUseHaStr;
    m_use_ema200      = m_is_gold ? false : m_is_silver ? true  : InpUseEma200;
-   m_ema200_len      = m_is_gold ? 200   : is_silver ? 200     : InpEma200Len;
+   m_ema200_len      = m_is_gold ? 200   : m_is_silver ? 200   : InpEma200Len;
    
    // 3. INICIALIZAR HANDLES DE INDICADORES
    h_ema_fast = iMA(_Symbol, m_ema_tf, m_ema_fast_len, 0, MODE_EMA, PRICE_CLOSE);
