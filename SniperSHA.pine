@@ -136,7 +136,7 @@ calcLotaje(equity, riskPct, slDist) =>
     pv > 0 and slDist > 0 ? montoRiesgo / (slDist * pv) : 0.0
 
 // Función para actualizar el SL dinámico en LONG (Compra)
-actualizarSlLong(precioHigh, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep, tSl, distSeguimiento) =>
+actualizarSlLong(precioHigh, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep, tSl, distSeguimiento, tRisk, beRR) =>
     float nuevoSl = tSl
     int nuevoStep = tStep
     float nuevaDist = distSeguimiento
@@ -147,7 +147,13 @@ actualizarSlLong(precioHigh, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep,
     float SL1 = slInicial + slTercio
     float BE  = tEnt
     
-    // si el precio >= (TP2 + (TP3/6)) entonces SL = TP3/2 (de aquí en adelante se mueve dinámicamente)
+    // 1. Regreso inmediato (BE): si avanza la distancia de beRR, SL va a entrada (BE)
+    if precioHigh >= tEnt + tRisk * beRR
+        nuevoSl := math.max(nuevoSl, BE)
+        if nuevoStep < 1
+            nuevoStep := 1
+            
+    // 2. Niveles por tercios
     if precioHigh >= (TP2 + (tpDist / 6.0))
         if tStep < 3
             nuevoStep := 3
@@ -159,22 +165,16 @@ actualizarSlLong(precioHigh, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep,
                 if trailingSl > tSl
                     nuevoSl := trailingSl
     else if precioHigh >= TP2
-        if tStep < 2
+        nuevoSl := math.max(nuevoSl, TP1)
+        if nuevoStep < 2
             nuevoStep := 2
-            nuevoSl   := math.max(tSl, TP1)
-        else
-            nuevoSl   := math.max(tSl, TP1)
     else if precioHigh >= TP1
-        if tStep < 1
-            nuevoStep := 1
-            nuevoSl   := math.max(tSl, SL1)
-        else
-            nuevoSl   := math.max(tSl, SL1)
+        nuevoSl := math.max(nuevoSl, SL1)
             
     [nuevoSl, nuevoStep, nuevaDist]
 
 // Función para actualizar el SL dinámico en SHORT (Venta)
-actualizarSlShort(precioLow, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep, tSl, distSeguimiento) =>
+actualizarSlShort(precioLow, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep, tSl, distSeguimiento, tRisk, beRR) =>
     float nuevoSl = tSl
     int nuevoStep = tStep
     float nuevaDist = distSeguimiento
@@ -185,7 +185,13 @@ actualizarSlShort(precioLow, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep,
     float SL1 = slInicial - slTercio
     float BE  = tEnt
     
-    // si el precio <= (TP2 - (TP3/6)) entonces SL = TP3/2 (de aquí en adelante se mueve dinámicamente)
+    // 1. Regreso inmediato (BE): si cae la distancia de beRR, SL va a entrada (BE)
+    if precioLow <= tEnt - tRisk * beRR
+        nuevoSl := math.min(nuevoSl, BE)
+        if nuevoStep < 1
+            nuevoStep := 1
+            
+    // 2. Niveles por tercios
     if precioLow <= (TP2 - (tpDist / 6.0))
         if tStep < 3
             nuevoStep := 3
@@ -197,17 +203,11 @@ actualizarSlShort(precioLow, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep,
                 if trailingSl < tSl
                     nuevoSl := trailingSl
     else if precioLow <= TP2
-        if tStep < 2
+        nuevoSl := math.min(nuevoSl, TP1)
+        if nuevoStep < 2
             nuevoStep := 2
-            nuevoSl   := math.min(tSl, TP1)
-        else
-            nuevoSl   := math.min(tSl, TP1)
     else if precioLow <= TP1
-        if tStep < 1
-            nuevoStep := 1
-            nuevoSl   := math.min(tSl, SL1)
-        else
-            nuevoSl   := math.min(tSl, SL1)
+        nuevoSl := math.min(nuevoSl, SL1)
             
     [nuevoSl, nuevoStep, nuevaDist]
 
@@ -287,7 +287,7 @@ if strategy.position_size != 0 and not na(tRisk) and not na(tTp)
     if strategy.position_size > 0
         // Actualización LONG
         float viejoSl = tSl
-        [nuevoSl, nuevoStep, nuevaDist] = actualizarSlLong(high, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep, tSl, distSeguimiento)
+        [nuevoSl, nuevoStep, nuevaDist] = actualizarSlLong(high, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep, tSl, distSeguimiento, tRisk, beRR)
         tSl             := nuevoSl
         tStep           := nuevoStep
         distSeguimiento := nuevaDist
@@ -297,7 +297,7 @@ if strategy.position_size != 0 and not na(tRisk) and not na(tTp)
     if strategy.position_size < 0
         // Actualización SHORT
         float viejoSl = tSl
-        [nuevoSl, nuevoStep, nuevaDist] = actualizarSlShort(low, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep, tSl, distSeguimiento)
+        [nuevoSl, nuevoStep, nuevaDist] = actualizarSlShort(low, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep, tSl, distSeguimiento, tRisk, beRR)
         tSl             := nuevoSl
         tStep           := nuevoStep
         distSeguimiento := nuevaDist
