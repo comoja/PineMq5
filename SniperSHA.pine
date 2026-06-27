@@ -158,27 +158,42 @@ actualizarSlLong(precioHigh, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep,
             nuevoStep := 1
             
     // 2. Regla especial: si el SL > TP3 * (4/6) y el precio < TP3 entonces borras el TP final y el TP3
-    float slLimite = tEnt + tpDist * (4.0 / 6.0)
-    if not na(nuevoTp) and nuevoSl > slLimite and precioHigh < TP3
+    float slLimite4_6 = tEnt + tpDist * (4.0 / 6.0)
+    float slLimite5_6 = tEnt + tpDist * (5.0 / 6.0)
+    
+    if not na(nuevoTp) and nuevoSl > slLimite4_6 and precioHigh < TP3
         nuevoTp := na
     else
-        // 3. Niveles por tercios
-        if precioHigh >= (TP2 + (tpDist / 6.0))
-            if tStep < 3
-                nuevoStep := 3
-                nuevoSl   := tEnt + (tpDist * 0.5)
+        // si el precio > TP3 * (5/6) y el precio < TP3 entonces borras el TP final y el TP3 y el SL se convierte en TP3 * (5/6) y se mueve al mismo tiempo que el precio
+        if precioHigh > slLimite5_6 and (na(nuevoTp) or precioHigh < TP3)
+            nuevoTp := na
+            if tStep < 4
+                nuevoStep := 4
+                nuevoSl   := slLimite5_6
                 nuevaDist := precioHigh - nuevoSl
             else
                 if not na(distSeguimiento)
                     float trailingSl = precioHigh - distSeguimiento
                     if trailingSl > tSl
                         nuevoSl := trailingSl
-        else if precioHigh >= TP2
-            nuevoSl := math.max(nuevoSl, TP1)
-            if nuevoStep < 2
-                nuevoStep := 2
-        else if precioHigh >= TP1
-            nuevoSl := math.max(nuevoSl, SL1)
+        else
+            // si el precio >= (TP2 + (TP3/6)) entonces SL = TP3/2 de aqui en adelante se debera mover al mismo tiempo que el precio
+            if precioHigh >= (TP2 + (tpDist / 6.0))
+                if tStep < 3
+                    nuevoStep := 3
+                    nuevoSl   := tEnt + (tpDist * 0.5)
+                    nuevaDist := precioHigh - nuevoSl
+                else
+                    if not na(distSeguimiento)
+                        float trailingSl = precioHigh - distSeguimiento
+                        if trailingSl > tSl
+                            nuevoSl := trailingSl
+            else if precioHigh >= TP2
+                nuevoSl := math.max(nuevoSl, TP1)
+                if nuevoStep < 2
+                    nuevoStep := 2
+            else if precioHigh >= TP1
+                nuevoSl := math.max(nuevoSl, SL1)
             
     [nuevoSl, nuevoStep, nuevaDist, nuevoTp]
 
@@ -202,27 +217,42 @@ actualizarSlShort(precioLow, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep,
             nuevoStep := 1
             
     // 2. Regla especial: si el SL > TP3 * (4/6) y el precio < TP3 entonces borras el TP final y el TP3
-    float slLimite = tEnt - tpDist * (4.0 / 6.0)
-    if not na(nuevoTp) and nuevoSl < slLimite and precioLow > TP3
+    float slLimite4_6 = tEnt - tpDist * (4.0 / 6.0)
+    float slLimite5_6 = tEnt - tpDist * (5.0 / 6.0)
+    
+    if not na(nuevoTp) and nuevoSl < slLimite4_6 and precioLow > TP3
         nuevoTp := na
     else
-        // 3. Niveles por tercios
-        if precioLow <= (TP2 - (tpDist / 6.0))
-            if tStep < 3
-                nuevoStep := 3
-                nuevoSl   := tEnt - (tpDist * 0.5)
+        // si el precio > TP3 * (5/6) y el precio < TP3 entonces borras el TP final y el TP3 y el SL se convierte en TP3 * (5/6) y se mueve al mismo tiempo que el precio
+        if precioLow < slLimite5_6 and (na(nuevoTp) or precioLow > TP3)
+            nuevoTp := na
+            if tStep < 4
+                nuevoStep := 4
+                nuevoSl   := slLimite5_6
                 nuevaDist := nuevoSl - precioLow
             else
                 if not na(distSeguimiento)
                     float trailingSl = precioLow + distSeguimiento
                     if trailingSl < tSl
                         nuevoSl := trailingSl
-        else if precioLow <= TP2
-            nuevoSl := math.min(nuevoSl, TP1)
-            if nuevoStep < 2
-                nuevoStep := 2
-        else if precioLow <= TP1
-            nuevoSl := math.min(nuevoSl, SL1)
+        else
+            // si el precio >= (TP2 + (TP3/6)) entonces SL = TP3/2 de aqui en adelante se debera mover al mismo tiempo que el precio
+            if precioLow <= (TP2 - (tpDist / 6.0))
+                if tStep < 3
+                    nuevoStep := 3
+                    nuevoSl   := tEnt - (tpDist * 0.5)
+                    nuevaDist := nuevoSl - precioLow
+                else
+                    if not na(distSeguimiento)
+                        float trailingSl = precioLow + distSeguimiento
+                        if trailingSl < tSl
+                            nuevoSl := trailingSl
+            else if precioLow <= TP2
+                nuevoSl := math.min(nuevoSl, TP1)
+                if nuevoStep < 2
+                    nuevoStep := 2
+            else if precioLow <= TP1
+                nuevoSl := math.min(nuevoSl, SL1)
             
     [nuevoSl, nuevoStep, nuevaDist, nuevoTp]
 
