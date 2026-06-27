@@ -200,12 +200,7 @@ if exitShort
 bool inPosition = (strategy.position_size != 0) or (strategy.position_size[1] != 0)
 
 plotSl  = plot(inPosition ? tSl : na, "SL Trailing Activo", color=color.orange, linewidth=2, style=plot.style_linebr)
-plotTp  = plot(inPosition ? tTp : na, "Take Profit Objetivo", color=color.lime, linewidth=1, style=plot.style_linebr, linestyle=plot.linestyle_dashed)
 plotEnt = plot(inPosition ? tEnt : na, "Precio Entrada", color=color.blue, linewidth=1, style=plot.style_linebr, linestyle=plot.linestyle_dashed)
-
-// Sombreado dinámico: verde para TP y rojo para SL a lo largo de la posición
-fill(plotEnt, plotTp, color=color.new(color.green, 93), title="Zona de Ganancia (TP)")
-fill(plotEnt, plotSl, color=color.new(color.red, 95),   title="Zona de Pérdida (SL)")
 
 // Dibuja un punto rojo/círculo en el gráfico en el precio exacto de salida histórica (tSl de la barra anterior)
 plot(exitLong or exitShort ? tSl[1] : na, "Punto de Salida Real", color=color.red, style=plot.style_circles, linewidth=4)
