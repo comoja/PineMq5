@@ -254,8 +254,16 @@ bool nearEma    = math.abs(close - emaVal) < atrVal * maxDistInp
 bool htfLongOk  = not (effIndex and useHtfInp) or htfBull
 bool htfShortOk = not (effIndex and useHtfInp) or htfBear
 
-bool longC  = permitLong  and imacdLongOk  and high > high[1] and adxOk and emaLongOk  and nearEma and htfLongOk and shaGreen
-bool shortC = permitShort and imacdShortOk and low  < low[1]  and adxOk and emaShortOk and nearEma and htfShortOk and shaRed
+// Alineaciones de condiciones
+bool longAligned  = imacdLongOk and adxOk and emaLongOk and nearEma and htfLongOk and shaGreen
+bool shortAligned = imacdShortOk and adxOk and emaShortOk and nearEma and htfShortOk and shaRed
+
+// Gatillos: solo se activan cuando las condiciones se alinean por primera vez
+bool longTrigger  = longAligned and not longAligned[1]
+bool shortTrigger = shortAligned and not shortAligned[1]
+
+bool longC  = permitLong  and longTrigger  and high > high[1]
+bool shortC = permitShort and shortTrigger and low  < low[1]
 
 // ══════════════════════════════════════════════════════════════════════════
 // SEÑALES DE ENTRADA
