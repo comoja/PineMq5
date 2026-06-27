@@ -64,6 +64,7 @@ beRRInp    = input.float(0.4,  "Break-even trigger (× riesgo)",    minval=0.1, 
 // GRUPO: FILTROS DE ENTRADA
 // ══════════════════════════════════════════════════════════════════════════
 gEntrada     = "═══ Filtros de Entrada ═══"
+useAdxFilter = input.bool(true,  "Usar Filtro ADX",                 group=gEntrada)
 adxMinInp    = input.int(23,    "ADX mínimo",                       minval=10, maxval=50,   group=gEntrada)
 adxRisingInp = input.bool(false, "Exigir ADX subiendo",             group=gEntrada)
 useHtfInp    = input.bool(true,  "Filtro HTF 1H (solo índices)",    group=gEntrada)
@@ -89,7 +90,7 @@ shaLen = input.int(10, "Período SHA", minval=3, maxval=50, group=gSha)
 // ══════════════════════════════════════════════════════════════════════════
 float atrMult = effSilver ? 0.1 : effGold ? 0.3 : effCrypto ? 0.15 : effIndex ? atrMultInp : 0.6
 float beRR    = effCrypto ? 0.5 : effIndex ? beRRInp : 0.7
-int   adxMin  = effIndex ? math.max(adxMinInp, 28) : adxMinInp
+int   adxMin  = effIndex ? math.max(adxMinInp, 28) : (effGold or effSilver) ? 18 : adxMinInp
 int   emaPer  = effSilver ? 9 : 21
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -100,7 +101,7 @@ emaVal         = ta.ema(close, emaPer)
 atrVal         = ta.atr(14)
 
 // Filtro ADX
-bool adxOk = adxVal > adxMin and (adxRisingInp ? ta.rising(adxVal, 1) : true)
+bool adxOk = not useAdxFilter or (adxVal > adxMin and (adxRisingInp ? ta.rising(adxVal, 1) : true))
 
 // Filtro HTF 1 hora
 float ema1h  = request.security(syminfo.tickerid, "60", ta.ema(close, 21), lookahead=barmerge.lookahead_off)
