@@ -24,11 +24,11 @@ gp_risk       = "--- GESTIÓN DE RIESGO ---"
 risk_perc     = input.float(1.0, "Riesgo por operación (%)", minval=0.1, maxval=10.0, group=gp_risk,
                  tooltip="Porcentaje de la equidad a arriesgar basado en la distancia del SL inicial")
 use_tp        = input.bool(true, "Usar Take Profit Fijo", group=gp_risk)
-rr_ratio      = input.float(3.0, "Relación Riesgo/Recompensa (R:R)", minval=0.5, step=0.1, group=gp_risk,
+rr_ratio_in   = input.float(3.0, "Relación Riesgo/Recompensa (R:R)", minval=0.5, step=0.1, group=gp_risk,
                  tooltip="Oro sugerido: 3.0. Plata sugerido: 2.5.")
-use_be        = input.bool(true, "Mover a Break-Even (Precio Entrada)", group=gp_risk,
+use_be_in     = input.bool(true, "Mover a Break-Even (Precio Entrada)", group=gp_risk,
                  tooltip="ACTIVADO: protege el capital moviendo el SL a precio de entrada cuando el precio avanza a tu favor.")
-be_ratio      = input.float(1.0, "Multiplicador R:R para Break-Even", minval=0.3, step=0.1, group=gp_risk,
+be_ratio_in   = input.float(1.0, "Multiplicador R:R para Break-Even", minval=0.3, step=0.1, group=gp_risk,
                  tooltip="1.0 = mueve a Break-Even al alcanzar beneficio 1:1 R:R (seguridad absoluta).")
 
 // ════════════════════════════════════════════════════════════════════
@@ -52,6 +52,20 @@ use_ha_str_in   = input.bool(false, "Fuerza Heikin-Ashi manual", group=gp_param)
 use_ema200_in   = input.bool(false, "Filtro EMA 200 manual", group=gp_param)
 ema200_len_in   = input.int(200,    "Período EMA 200 manual", minval=1, group=gp_param)
 
+// Filtros específicos adicionales manuales
+use_atr_min_in   = input.bool(false, "Filtro ATR Mínimo manual", group=gp_param)
+atr_filter_len_in = input.int(14,    "Período ATR manual", minval=1, group=gp_param)
+atr_min_usd_in   = input.float(2.0,  "ATR Mínimo USD manual", minval=0.1, step=0.1, group=gp_param)
+use_adx_in       = input.bool(false, "Filtro ADX manual", group=gp_param)
+adx_len_in       = input.int(14,     "Período ADX manual", minval=1, group=gp_param)
+adx_min_in       = input.float(22.0, "ADX Mínimo manual", minval=5.0, step=1.0, group=gp_param)
+use_rsi_in       = input.bool(false, "Filtro RSI manual", group=gp_param)
+rsi_len_in       = input.int(14,     "Período RSI manual", minval=1, group=gp_param)
+rsi_ob_in        = input.float(70.0, "RSI Sobrecompra manual", minval=50.0, group=gp_param)
+rsi_os_in        = input.float(30.0, "RSI Sobreventa manual", maxval=50.0, group=gp_param)
+use_htf_in       = input.bool(false, "Filtro HTF manual", group=gp_param)
+htf_ema_len_in   = input.int(50,     "Período EMA HTF manual", minval=1, group=gp_param)
+
 // Filtro Horario General (Londres + Nueva York)
 gp_ses          = "--- CONTROL DE SESIÓN ---"
 use_session     = input.bool(false, "Usar Sesión Horaria", group=gp_ses,
@@ -69,21 +83,41 @@ is_gold   = asset_profile == "Oro (XAUUSD)"   or (asset_profile == "Auto" and is
 is_silver = asset_profile == "Plata (XAGUSD)" or (asset_profile == "Auto" and is_silver_symbol)
 
 // Asignación inteligente de variables basadas en el perfil cargado
-ema_tf          = is_gold ? "Auto" : is_silver ? "15" : ema_tf_input // Plata opera con EMAs locales de 15m por defecto
-ema_fast_len    = is_gold ? 21    : is_silver ? 9     : ema_fast_len_in
-ema_slow_len    = is_gold ? 55    : is_silver ? 21    : ema_slow_len_in
-swing_period    = is_gold ? 8     : is_silver ? 5     : swing_period_in
-sl_buffer_pts   = is_gold ? 2.0   : is_silver ? 0.0   : sl_buf_pts_in
+ema_tf          = is_gold ? "Auto" : is_silver ? "15" : ema_tf_input
+ema_fast_len    = is_gold ? 21     : is_silver ? 9     : ema_fast_len_in
+ema_slow_len    = is_gold ? 55     : is_silver ? 21    : ema_slow_len_in
+swing_period    = is_gold ? 8      : is_silver ? 5     : swing_period_in
+sl_buffer_pts   = is_gold ? 2.0    : is_silver ? 0.0   : sl_buf_pts_in
 
-use_imacd       = is_gold ? false : is_silver ? true  : use_imacd_in
-imacd_len       = is_gold ? 35    : is_silver ? 35    : imacd_len_in
+// Gestión de riesgo dinámica
+rr_ratio        = is_gold ? 3.0    : is_silver ? 2.5   : rr_ratio_in
+use_be          = is_gold ? false  : is_silver ? true  : use_be_in
+be_ratio        = is_gold ? 1.0    : is_silver ? 1.0   : be_ratio_in
 
-use_ema_spread  = is_gold ? true  : is_silver ? false : use_ema_spr_in
-ema_spread_mult = is_gold ? 0.4   : is_silver ? 0.0   : ema_spr_mult_in
+// iMACD e Abertura
+use_imacd       = is_gold ? false  : is_silver ? true  : use_imacd_in
+imacd_len       = is_gold ? 35     : is_silver ? 35    : imacd_len_in
+use_ema_spread  = is_gold ? true   : is_silver ? false : use_ema_spr_in
+ema_spread_mult = is_gold ? 0.4    : is_silver ? 0.0   : ema_spr_mult_in
 
-use_ha_strength = is_gold ? false : is_silver ? true  : use_ha_str_in
-use_ema200      = is_gold ? false : is_silver ? true  : use_ema200_in
-ema200_len      = is_gold ? 200   : is_silver ? 200   : ema200_len_in
+// Filtros optimizados base
+use_ha_strength = is_gold ? false  : is_silver ? true  : use_ha_str_in
+use_ema200      = is_gold ? false  : is_silver ? true  : use_ema200_in
+ema200_len      = is_gold ? 200    : is_silver ? 200   : ema200_len_in
+
+// Filtros específicos adicionales de Oro
+use_atr_min     = is_gold ? false  : is_silver ? false : use_atr_min_in
+atr_filter_len  = is_gold ? 14     : is_silver ? 14    : atr_filter_len_in
+atr_min_usd     = is_gold ? 2.0    : is_silver ? 2.0   : atr_min_usd_in
+use_adx         = is_gold ? false  : is_silver ? false : use_adx_in
+adx_len         = is_gold ? 14     : is_silver ? 14    : adx_len_in
+adx_min         = is_gold ? 22.0   : is_silver ? 22.0  : adx_min_in
+use_rsi         = is_gold ? false  : is_silver ? false : use_rsi_in
+rsi_len         = is_gold ? 14     : is_silver ? 14    : rsi_len_in
+rsi_ob          = is_gold ? 70.0   : is_silver ? 70.0  : rsi_ob_in
+rsi_os          = is_gold ? 30.0   : is_silver ? 30.0  : rsi_os_in
+use_htf         = is_gold ? false  : is_silver ? false : use_htf_in
+htf_ema_len     = is_gold ? 50     : is_silver ? 50    : htf_ema_len_in
 
 // ════════════════════════════════════════════════════════════════════
 // 5. CÁLCULO DE VELAS HEIKIN-ASHI RECURSIVAS NATIVAS
@@ -165,16 +199,33 @@ ema200_short_ok = not use_ema200 or (close < ema_200)
 ha_strength_long  = not use_ha_strength or (haLow  == haOpen)
 ha_strength_short = not use_ha_strength or (haHigh == haOpen)
 
+// Filtros específicos de Oro adicionales
+atr_val  = ta.atr(atr_filter_len)
+atr_ok   = not use_atr_min or (atr_val >= atr_min_usd)
+
+[adx_val, di_plus, di_minus] = ta.dmi(adx_len, adx_len)
+adx_ok = not use_adx or (adx_val >= adx_min)
+
+rsi_val      = ta.rsi(close, rsi_len)
+rsi_long_ok  = not use_rsi or (rsi_val < rsi_ob)
+rsi_short_ok = not use_rsi or (rsi_val > rsi_os)
+
+htf_ema      = request.security(syminfo.tickerid, "60", ta.ema(close, htf_ema_len), lookahead=barmerge.lookahead_off)
+htf_long_ok  = not use_htf or (close > htf_ema)
+htf_short_ok = not use_htf or (close < htf_ema)
+
 // ════════════════════════════════════════════════════════════════════
 // 8. CONDICIONES DE ALINEACIÓN Y GATILLOS
 // ════════════════════════════════════════════════════════════════════
 is_long_aligned  = (ema_fast > ema_slow) and ha_green and
                    imacd_long_ok  and ema200_long_ok  and ha_strength_long  and
-                   in_session     and abertura_ok
+                   in_session     and abertura_ok     and atr_ok            and
+                   adx_ok         and rsi_long_ok      and htf_long_ok
 
 is_short_aligned = (ema_fast < ema_slow) and ha_red and
                    imacd_short_ok and ema200_short_ok and ha_strength_short and
-                   in_session     and abertura_ok
+                   in_session     and abertura_ok     and atr_ok            and
+                   adx_ok         and rsi_short_ok     and htf_short_ok
 
 // Confirmación de velas consecutivas
 confirm_bars = 2
@@ -301,8 +352,8 @@ var table main_table = table.new(position.top_right, 2, 9,
 
 if barstate.islast
     in_trade    = strategy.position_size != 0
-    atr_val     = ta.atr(14)
-    atr_display = str.tostring(atr_val, "#.##") + " USD"
+    table_atr   = ta.atr(14)
+    atr_display = str.tostring(table_atr, "#.##") + " USD"
     
     profile_name = is_gold ? "ORO (Auto)" : is_silver ? "PLATA (Auto)" : "MANUAL"
     display_tf   = resolved_tf == "180" ? "3h" : resolved_tf == "240" ? "4h" : resolved_tf == "60" ? "1h" : resolved_tf == "30" ? "30m" : resolved_tf == "1440" ? "1d" : resolved_tf
