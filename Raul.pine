@@ -1,0 +1,173 @@
+//@version=6
+// ══════════════════════════════════════════════════════════════════════════
+// │                         ESTRATEGIA RAUL                                │
+// │         Rompimiento de Rango con Filtro de Medias y Trailing           │
+// │                                                                        │
+// │  RESUMEN:                                                              │
+// │  - Rango: Determina un precio máximo y mínimo en base a 20 velas.      │
+// │  - Gatillo: 3 velas consecutivas alcistas/bajistas que rompen el       │
+// │            50% del rango (punto medio).                                │
+// │  - Tendencia: Exige apertura y alineación de EMA 21 y EMA 55.          │
+// │  - SL: 1 punto por debajo (compra) o por encima (venta) del rango.     │
+// │  - TP: Trailing stop activo de 25 puntos.                              │
+// ══════════════════════════════════════════════════════════════════════════
+
+strategy("Estrategia Raul", overlay=true,
+         initial_capital      = 500,
+         default_qty_type     = strategy.percent_of_equity,
+         default_qty_value    = 10,
+         process_orders_on_close = true,
+         commission_type      = strategy.commission.percent,
+         commission_value     = 0.04)
+
+// ══════════════════════════════════════════════════════════════════════════
+// GRUPO: IDENTIFICACIÓN Y CONFIGURACIÓN GENERAL
+// ══════════════════════════════════════════════════════════════════════════
+gGral    = "═══ Configuración General ═══"
+magicNum = input.int(889900, "Magic Number (referencia MQ5)", group=gGral)
+
+// Detección de instrumento
+bool isSilver = str.contains(str.lower(syminfo.ticker), "xag") or str.contains(str.lower(syminfo.ticker), "silver") or str.contains(str.lower(syminfo.ticker), "plata")
+bool isGold   = str.contains(str.lower(syminfo.ticker), "xau") or str.contains(str.lower(syminfo.ticker), "gold")   or str.contains(str.lower(syminfo.ticker), "oro")
+bool isCrypto = syminfo.type == "crypto"
+bool isForex  = syminfo.type == "forex"
+bool isIndex  = syminfo.type == "index" or str.contains(str.lower(syminfo.ticker), "nas") or str.contains(str.lower(syminfo.ticker), "us100")
+
+// ══════════════════════════════════════════════════════════════════════════
+// GRUPO: FILTROS DE ENTRADA Y RANGO
+// ══════════════════════════════════════════════════════════════════════════
+gEntrada   = "═══ Filtros de Rango y Entrada ═══"
+rangoVelas = input.int(20, "Velas para definir rango", minval=10, maxval=100, group=gEntrada)
+emaFastPer = input.int(21, "Período EMA Rápida",      minval=5, maxval=50,   group=gEntrada)
+emaSlowPer = input.int(55, "Período EMA Lenta",       minval=20, maxval=200, group=gEntrada)
+
+// ══════════════════════════════════════════════════════════════════════════
+// GRUPO: GESTIÓN DE RIESGO
+// ══════════════════════════════════════════════════════════════════════════
+gRiesgo    = "═══ Gestión de Riesgo ═══"
+riesgoPct  = input.float(1.0,  "Riesgo por operación (%)", minval=0.1, maxval=10.0, step=0.1,  group=gRiesgo)
+trailPts   = input.int(25,     "Distancia Trailing (Puntos)", minval=5, maxval=500,           group=gRiesgo, tooltip="Distancia en puntos/ticks para el trailing stop")
+slBuffer   = input.float(1.0,  "Buffer SL (Puntos)",          minval=0.0, step=0.5,           group=gRiesgo, tooltip="Puntos por debajo/encima del rango para el SL")
+
+// ══════════════════════════════════════════════════════════════════════════
+// CÁLCULO DE RANGOS E INDICADORES
+// ══════════════════════════════════════════════════════════════════════════
+// El rango se calcula con 20 velas anteriores (excluyendo las últimas 3 velas que buscan el rompimiento)
+rangoMax   = ta.highest(high[3], rangoVelas)
+rangoMin   = ta.lowest(low[3], rangoVelas)
+rangoMedio = (rangoMax + rangoMin) / 2.0
+
+// Medias móviles
+emaFast = ta.ema(close, emaFastPer)
+emaSlow = ta.ema(close, emaSlowPer)
+
+plot(emaFast, "EMA Rápida", color=color.green, linewidth=2)
+plot(emaSlow, "EMA Lenta",  color=color.red,   linewidth=2)
+
+// Dibujar canales del rango de referencia en el gráfico
+var line maxLine = na
+var line minLine = na
+var line midLine = na
+
+if barstate.islast
+    line.delete(maxLine)
+    line.delete(minLine)
+    line.delete(midLine)
+    maxLine := line.new(bar_index - rangoVelas - 3, rangoMax, bar_index, rangoMax, color=color.red, width=2, style=line.style_dashed)
+    minLine := line.new(bar_index - rangoVelas - 3, rangoMin, bar_index, rangoMin, color=color.green, width=2, style=line.style_dashed)
+    midLine := line.new(bar_index - rangoVelas - 3, rangoMedio, bar_index, rangoMedio, color=color.orange, width=1, style=line.style_dotted)
+
+// ══════════════════════════════════════════════════════════════════════════
+// CONDICIONES DE ROMPIMIENTO (3 velas consecutivas en el mismo sentido)
+// ══════════════════════════════════════════════════════════════════════════
+// Alcista: 3 velas verdes consecutivas cerrando sobre el 50% (rangoMedio)
+bool velasAlcistas = (close[1] > open[1]) and (close[2] > open[2]) and (close[3] > open[3])
+bool rompeMedioLong = velasAlcistas and (close[1] > rangoMedio) and (close[2] > rangoMedio) and (close[3] > rangoMedio)
+
+// Bajista: 3 velas rojas consecutivas cerrando bajo el 50% (rangoMedio)
+bool velasBajistas = (close[1] < open[1]) and (close[2] < open[2]) and (close[3] < open[3])
+bool rompeMedioShort = velasBajistas and (close[1] < rangoMedio) and (close[2] < rangoMedio) and (close[3] < rangoMedio)
+
+// Abertura y alineación de EMAs (apertura a favor de la tendencia)
+bool emasLongOk  = (emaFast > emaSlow) and ta.rising(emaFast, 1)
+bool emasShortOk = (emaFast < emaSlow) and ta.falling(emaFast, 1)
+
+// ══════════════════════════════════════════════════════════════════════════
+// SEÑALES DE ENTRADA Y LOTE
+// ══════════════════════════════════════════════════════════════════════════
+bool flat = strategy.position_size == 0
+
+bool longC  = flat and rompeMedioLong  and emasLongOk
+bool shortC = flat and rompeMedioShort and emasShortOk
+
+// Funciones de cálculo según reglas.md
+calcSL(esLong, rMin, rMax, buffer) =>
+    float bufferPts = buffer * syminfo.mintick
+    esLong ? rMin - bufferPts : rMax + bufferPts
+
+calcLotaje(equity, riskPct, slDist) =>
+    float montoRiesgo = equity * (riskPct / 100.0)
+    float pv          = syminfo.pointvalue
+    pv > 0 and slDist > 0 ? montoRiesgo / (slDist * pv) : 0.0
+
+// Variables persistentes
+var float tSl   = na
+var float tEnt  = na
+var float tRisk = na
+
+if longC
+    tEnt  := close
+    tSl   := calcSL(true, rangoMin, rangoMax, slBuffer)
+    tRisk := math.abs(tEnt - tSl)
+    float lote = calcLotaje(strategy.equity, riesgoPct, tRisk)
+    strategy.entry("L", strategy.long, qty=lote)
+    label.new(bar_index, low, "▲ RAUL COMPRA", color=color.green, textcolor=color.white, style=label.style_label_up, size=size.small)
+
+if shortC
+    tEnt  := close
+    tSl   := calcSL(false, rangoMin, rangoMax, slBuffer)
+    tRisk := math.abs(tEnt - tSl)
+    float lote = calcLotaje(strategy.equity, riesgoPct, tRisk)
+    strategy.entry("S", strategy.short, qty=lote)
+    label.new(bar_index, high, "▼ RAUL VENTA", color=color.red, textcolor=color.white, style=label.style_label_down, size=size.small)
+
+// ══════════════════════════════════════════════════════════════════════════
+// SALIDAS CON TRAILING STOP DE 25 PUNTOS
+// ══════════════════════════════════════════════════════════════════════════
+if strategy.position_size != 0
+    // Trailing stop de 25 puntos vía trail_points
+    strategy.exit("Exit", stop=tSl, trail_points=trailPts, trail_offset=trailPts)
+
+// Reset al cerrar posición
+if strategy.position_size == 0
+    tSl   := na
+    tEnt  := na
+    tRisk := na
+
+// ══════════════════════════════════════════════════════════════════════════
+// INDICADOR DE CALIDAD (bgcolor)
+// ══════════════════════════════════════════════════════════════════════════
+// Verde si el profit neto acumulado es positivo, rojo si está en negativo
+color qualColor = strategy.netprofit >= 0 ? color.new(color.green, 93) : color.new(color.red, 93)
+bgcolor(qualColor, title="Calidad Backtest")
+
+// ══════════════════════════════════════════════════════════════════════════
+// TABLA DE ESTADO
+// ══════════════════════════════════════════════════════════════════════════
+var table panel = table.new(position.top_right, 2, 5,
+                            bgcolor=color.new(color.black, 20),
+                            border_width=1, border_color=color.gray)
+if barstate.islast
+    string dir    = strategy.position_size > 0 ? "🟢 LONG" : strategy.position_size < 0 ? "🔴 SHORT" : "⬜ FLAT"
+    string tipoAct = isSilver ? "Plata" : isGold ? "Oro" : isCrypto ? "Crypto" : isForex ? "Forex" : isIndex ? "Índice" : "Otro"
+
+    table.cell(panel, 0, 0, "Raul Strategy", text_color=color.yellow, text_size=size.small)
+    table.cell(panel, 1, 0, "Magic: " + str.tostring(magicNum), text_color=color.gray, text_size=size.tiny)
+    table.cell(panel, 0, 1, "Activo",       text_color=color.white,  text_size=size.small)
+    table.cell(panel, 1, 1, tipoAct,        text_color=color.yellow, text_size=size.small)
+    table.cell(panel, 0, 2, "Posición",     text_color=color.white,  text_size=size.small)
+    table.cell(panel, 1, 2, dir,            text_color=color.white,  text_size=size.small)
+    table.cell(panel, 0, 3, "Trailing Pts", text_color=color.white,  text_size=size.small)
+    table.cell(panel, 1, 3, str.tostring(trailPts), text_color=color.orange, text_size=size.small)
+    table.cell(panel, 0, 4, "Net Profit",   text_color=color.white,  text_size=size.small)
+    table.cell(panel, 1, 4, "$" + str.tostring(strategy.equity, "#.##"), text_color=strategy.netprofit >= 0 ? color.green : color.red, text_size=size.small)
