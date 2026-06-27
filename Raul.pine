@@ -120,8 +120,6 @@ if longC
     float lote = calcLotaje(strategy.equity, riesgoPct, tRisk)
     strategy.entry("L", strategy.long, qty=lote)
     label.new(bar_index, low, "▲ RAUL COMPRA", color=color.green, textcolor=color.white, style=label.style_label_up, size=size.small)
-    box.new(bar_index, tTp, bar_index + 15, tEnt, bgcolor=color.new(color.green, 55), border_color=na)
-    box.new(bar_index, tEnt, bar_index + 15, tSl, bgcolor=color.new(color.red, 55), border_color=na)
 
 if shortC
     tEnt    := close
@@ -132,8 +130,6 @@ if shortC
     float lote = calcLotaje(strategy.equity, riesgoPct, tRisk)
     strategy.entry("S", strategy.short, qty=lote)
     label.new(bar_index, high, "▼ RAUL VENTA", color=color.red, textcolor=color.white, style=label.style_label_down, size=size.small)
-    box.new(bar_index, tEnt, bar_index + 15, tTp, bgcolor=color.new(color.green, 55), border_color=na)
-    box.new(bar_index, tSl, bar_index + 15, tEnt, bgcolor=color.new(color.red, 55), border_color=na)
 
 // ══════════════════════════════════════════════════════════════════════════
 // GESTIÓN Y CÁLCULO DE TRAILING STOP EXPLÍCITO
@@ -176,9 +172,13 @@ bool exitShort = (strategy.position_size[1] < 0 and strategy.position_size == 0)
 // ══════════════════════════════════════════════════════════════════════════
 bool inPosition = (strategy.position_size != 0) or (strategy.position_size[1] != 0)
 
-plot(inPosition ? tSl : na, "SL Trailing Activo", color=color.orange, linewidth=2, style=plot.style_linebr)
-plot(inPosition ? tTp : na, "Take Profit Objetivo", color=color.lime, linewidth=1, style=plot.style_linebr, linestyle=plot.linestyle_dashed)
-plot(inPosition ? tEnt : na, "Precio Entrada", color=color.blue, linewidth=1, style=plot.style_linebr, linestyle=plot.linestyle_dashed)
+plotSl  = plot(inPosition ? tSl : na, "SL Trailing Activo", color=color.orange, linewidth=2, style=plot.style_linebr)
+plotTp  = plot(inPosition ? tTp : na, "Take Profit Objetivo", color=color.lime, linewidth=1, style=plot.style_linebr, linestyle=plot.linestyle_dashed)
+plotEnt = plot(inPosition ? tEnt : na, "Precio Entrada", color=color.blue, linewidth=1, style=plot.style_linebr, linestyle=plot.linestyle_dashed)
+
+// Sombreado dinámico: verde para TP y rojo para SL a lo largo de la posición
+fill(plotEnt, plotTp, color=color.new(color.green, 93), title="Zona de Ganancia (TP)")
+fill(plotEnt, plotSl, color=color.new(color.red, 95),   title="Zona de Pérdida (SL)")
 
 // Dibuja un punto rojo/círculo en el gráfico en el precio exacto de salida histórica (tSl de la barra anterior)
 plot(exitLong or exitShort ? tSl[1] : na, "Punto de Salida Real", color=color.red, style=plot.style_circles, linewidth=4)
