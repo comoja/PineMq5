@@ -37,6 +37,7 @@ bool isIndex  = syminfo.type == "index" or str.contains(str.lower(syminfo.ticker
 // GRUPO: FILTROS DE ENTRADA Y RANGO
 // ══════════════════════════════════════════════════════════════════════════
 gEntrada      = "═══ Filtros de Rango y Entrada ═══"
+rangoVelas    = input.int(25,    "Velas para definir rango",       group=gEntrada)
 emaFastPer    = input.int(21,    "Período EMA Rápida",             group=gEntrada)
 emaSlowPer    = input.int(55,    "Período EMA Lenta",              group=gEntrada)
 imacdPer      = input.int(34,    "Período IMACD",                  group=gEntrada)
@@ -65,22 +66,20 @@ imacdMd = close > imacdMi ? close - ta.lowest(low, imacdPer) : close < imacdMi ?
 imacdSh = imacdMd - ta.sma(imacdMd, imacdSmooth)
 imacdThresh = atrVal * imacdThreshPc
 
-// Identificación de mercado en rango paralelo
+// Identificación de mercado en rango paralelo en la vela actual
 bool enRangoImacd = math.abs(imacdSh) <= imacdThresh
 
-// Variables persistentes para el máximo y mínimo de la consolidación lateral
-var float rangoMax = na
-var float rangoMin = na
-
-if enRangoImacd
-    if not enRangoImacd[1] or na(rangoMax)
-        rangoMax := high
-        rangoMin := low
-    else
-        rangoMax := math.max(rangoMax, high)
-        rangoMin := math.min(rangoMin, low)
-
+// El rango local se calcula sobre las rangoVelas anteriores (excluyendo las 3 velas recientes de rompimiento)
+rangoMax   = ta.highest(high[3], rangoVelas)
+rangoMin   = ta.lowest(low[3], rangoVelas)
 rangoMedio = (rangoMax + rangoMin) / 2.0
+
+// Filtro de mercado paralelo: Exigimos que al menos el 60% de las velas en la ventana de consolidación previa estuvieran en rango lateral según IMACD
+int countEnRango = 0
+for i = 3 to rangoVelas + 2
+    if enRangoImacd[i]
+        countEnRango := countEnRango + 1
+bool consolidadoValido = countEnRango >= (rangoVelas * 0.6)
 
 plot(emaFast, "EMA Rápida", color=color.green, linewidth=2)
 plot(emaSlow, "EMA Lenta",  color=color.red,   linewidth=2)
@@ -111,8 +110,8 @@ bool emasShortOk = (emaFast < emaSlow) and ta.falling(emaFast, 1)
 // ══════════════════════════════════════════════════════════════════════════
 bool flat = strategy.position_size == 0
 
-bool longC  = flat and rompeMedioLong  and emasLongOk
-bool shortC = flat and rompeMedioShort and emasShortOk
+bool longC  = flat and rompeMedioLong  and emasLongOk and consolidadoValido
+bool shortC = flat and rompeMedioShort and emasShortOk and consolidadoValido
 
 // Funciones de cálculo según reglas.md
 calcSL(esLong, rMin, rMax, buffer) =>
