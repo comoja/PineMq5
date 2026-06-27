@@ -356,7 +356,7 @@ if barstate.islast
     atr_display = str.tostring(table_atr, "#.##") + " USD"
     
     profile_name = is_gold ? "ORO (Auto)" : is_silver ? "PLATA (Auto)" : "MANUAL"
-    tf_sugerido  = is_gold ? "1h" : is_silver ? "30m" : "-"
+    tf_sugerido  = is_gold ? "1h" : is_silver ? "30min" : "-"
     display_tf   = resolved_tf == "180" ? "3h" : resolved_tf == "240" ? "4h" : resolved_tf == "60" ? "1h" : resolved_tf == "30" ? "30m" : resolved_tf == "1440" ? "1d" : resolved_tf
     imacd_status = not use_imacd ? "DESACTIVADO" : md == 0.0 ? "RANGO" : md > 0.0 ? "ALCISTA" : "BAJISTA"
     imacd_color  = not use_imacd ? color.gray   : md == 0.0 ? color.orange : md > 0.0 ? color.green : color.red
