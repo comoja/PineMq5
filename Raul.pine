@@ -111,38 +111,68 @@ calcLotaje(equity, riskPct, slDist) =>
     pv > 0 and slDist > 0 ? montoRiesgo / (slDist * pv) : 0.0
 
 // Variables persistentes
-var float tSl   = na
-var float tEnt  = na
-var float tRisk = na
+var float tSl     = na
+var float tEnt    = na
+var float tRisk   = na
+var float maxHigh = na
+var float minLow  = na
 
 if longC
-    tEnt  := close
-    tSl   := calcSL(true, rangoMin, rangoMax, slBuffer)
-    tRisk := math.abs(tEnt - tSl)
+    tEnt    := close
+    tSl     := calcSL(true, rangoMin, rangoMax, slBuffer)
+    tRisk   := math.abs(tEnt - tSl)
+    maxHigh := high
     float lote = calcLotaje(strategy.equity, riesgoPct, tRisk)
     strategy.entry("L", strategy.long, qty=lote)
     label.new(bar_index, low, "▲ RAUL COMPRA", color=color.green, textcolor=color.white, style=label.style_label_up, size=size.small)
+    box.new(bar_index, tEnt, bar_index + 15, tSl, bgcolor=color.new(color.red, 55), border_color=na)
 
 if shortC
-    tEnt  := close
-    tSl   := calcSL(false, rangoMin, rangoMax, slBuffer)
-    tRisk := math.abs(tEnt - tSl)
+    tEnt    := close
+    tSl     := calcSL(false, rangoMin, rangoMax, slBuffer)
+    tRisk   := math.abs(tEnt - tSl)
+    minLow  := low
     float lote = calcLotaje(strategy.equity, riesgoPct, tRisk)
     strategy.entry("S", strategy.short, qty=lote)
     label.new(bar_index, high, "▼ RAUL VENTA", color=color.red, textcolor=color.white, style=label.style_label_down, size=size.small)
+    box.new(bar_index, tSl, bar_index + 15, tEnt, bgcolor=color.new(color.red, 55), border_color=na)
 
 // ══════════════════════════════════════════════════════════════════════════
-// SALIDAS CON TRAILING STOP DE 25 PUNTOS
+// GESTIÓN Y CÁLCULO DE TRAILING STOP EXPLÍCITO
 // ══════════════════════════════════════════════════════════════════════════
+if strategy.position_size > 0
+    maxHigh := math.max(maxHigh, high)
+    float trailingSl = maxHigh - (trailPts * syminfo.mintick)
+    if not na(tSl)
+        tSl := math.max(tSl, trailingSl)
+    else
+        tSl := trailingSl
+
+if strategy.position_size < 0
+    minLow := math.min(minLow, low)
+    float trailingSl = minLow + (trailPts * syminfo.mintick)
+    if not na(tSl)
+        tSl := math.min(tSl, trailingSl)
+    else
+        tSl := trailingSl
+
+// Salida usando el stop loss dinámico calculado
 if strategy.position_size != 0
-    // Trailing stop de 25 puntos vía trail_points
-    strategy.exit("Exit", stop=tSl, trail_points=trailPts, trail_offset=trailPts)
+    strategy.exit("Exit", stop=tSl)
 
 // Reset al cerrar posición
 if strategy.position_size == 0
-    tSl   := na
-    tEnt  := na
-    tRisk := na
+    tSl     := na
+    tEnt    := na
+    tRisk   := na
+    maxHigh := na
+    minLow  := na
+
+// ══════════════════════════════════════════════════════════════════════════
+// DIBUJAR ENTRADA Y SL TRAILING
+// ══════════════════════════════════════════════════════════════════════════
+plot(strategy.position_size != 0 ? tSl : na, "SL Trailing Activo", color=color.orange, linewidth=2, style=plot.style_linebr)
+plot(strategy.position_size != 0 ? tEnt : na, "Precio Entrada", color=color.blue, linewidth=1, style=plot.style_linebr, linestyle=plot.linestyle_dashed)
 
 // ══════════════════════════════════════════════════════════════════════════
 // INDICADOR DE CALIDAD (bgcolor)
