@@ -36,10 +36,12 @@ bool isIndex  = syminfo.type == "index" or str.contains(str.lower(syminfo.ticker
 // ══════════════════════════════════════════════════════════════════════════
 // GRUPO: FILTROS DE ENTRADA Y RANGO
 // ══════════════════════════════════════════════════════════════════════════
-gEntrada   = "═══ Filtros de Rango y Entrada ═══"
-rangoVelas = input.int(20, "Velas para definir rango", minval=10, maxval=100, group=gEntrada)
-emaFastPer = input.int(21, "Período EMA Rápida",      minval=5, maxval=50,   group=gEntrada)
-emaSlowPer = input.int(55, "Período EMA Lenta",       minval=20, maxval=200, group=gEntrada)
+gEntrada      = "═══ Filtros de Rango y Entrada ═══"
+emaFastPer    = input.int(21,    "Período EMA Rápida",             group=gEntrada)
+emaSlowPer    = input.int(55,    "Período EMA Lenta",              group=gEntrada)
+imacdPer      = input.int(34,    "Período IMACD",                  group=gEntrada)
+imacdSmooth   = input.int(9,     "Suavizado histograma IMACD",     group=gEntrada)
+imacdThreshPc = input.float(0.3, "Umbral Rango IMACD (× ATR)",      group=gEntrada)
 
 // ══════════════════════════════════════════════════════════════════════════
 // GRUPO: GESTIÓN DE RIESGO
@@ -50,25 +52,44 @@ trailPts   = input.int(25,     "Distancia Trailing (Puntos)", minval=5, maxval=5
 slBuffer   = input.float(1.0,  "Buffer SL (Puntos)",          minval=0.0, step=0.5,           group=gRiesgo, tooltip="Puntos por debajo/encima del rango para el SL")
 
 // ══════════════════════════════════════════════════════════════════════════
-// CÁLCULO DE RANGOS E INDICADORES
+// CÁLCULO DE RANGOS E INDICADORES (MERCADO PARALELO IMACD)
 // ══════════════════════════════════════════════════════════════════════════
-// El rango se calcula con 20 velas anteriores (excluyendo las últimas 3 velas que buscan el rompimiento)
-rangoMax   = ta.highest(high[3], rangoVelas)
-rangoMin   = ta.lowest(low[3], rangoVelas)
-rangoMedio = (rangoMax + rangoMin) / 2.0
-
-// Medias móviles
+// Medias móviles de tendencia
 emaFast = ta.ema(close, emaFastPer)
 emaSlow = ta.ema(close, emaSlowPer)
+
+// Cálculo del Impulse MACD para identificar el mercado paralelo
+atrVal = ta.atr(14)
+imacdMi = ta.sma(close, imacdPer)
+imacdMd = close > imacdMi ? close - ta.lowest(low, imacdPer) : close < imacdMi ? close - ta.highest(high, imacdPer) : 0.0
+imacdSh = imacdMd - ta.sma(imacdMd, imacdSmooth)
+imacdThresh = atrVal * imacdThreshPc
+
+// Identificación de mercado en rango paralelo
+bool enRangoImacd = math.abs(imacdSh) <= imacdThresh
+
+// Variables persistentes para el máximo y mínimo de la consolidación lateral
+var float rangoMax = na
+var float rangoMin = na
+
+if enRangoImacd
+    if not enRangoImacd[1] or na(rangoMax)
+        rangoMax := high
+        rangoMin := low
+    else
+        rangoMax := math.max(rangoMax, high)
+        rangoMin := math.min(rangoMin, low)
+
+rangoMedio = (rangoMax + rangoMin) / 2.0
 
 plot(emaFast, "EMA Rápida", color=color.green, linewidth=2)
 plot(emaSlow, "EMA Lenta",  color=color.red,   linewidth=2)
 
 // Dibujar canales y sombreado del rango de referencia en el gráfico histórico
-pMax = plot(rangoMax, "Techo Rango (Máx 20 Velas)", color=color.new(color.red, 50), linewidth=1, style=plot.style_line)
-pMin = plot(rangoMin, "Piso Rango (Mín 20 Velas)",  color=color.new(color.green, 50), linewidth=1, style=plot.style_line)
+pMax = plot(rangoMax, "Techo Rango (IMACD)", color=color.new(color.red, 50), linewidth=1, style=plot.style_line)
+pMin = plot(rangoMin, "Piso Rango (IMACD)",  color=color.new(color.green, 50), linewidth=1, style=plot.style_line)
 plot(rangoMedio, "Mitad Rango (50%)", color=color.new(color.orange, 60), linewidth=1, style=plot.style_line, linestyle=plot.linestyle_dotted)
-fill(pMax, pMin, color=color.new(color.yellow, 97), title="Zona de Rango")
+fill(pMax, pMin, color=color.new(color.yellow, 97), title="Zona de Rango Parallel")
 
 // ══════════════════════════════════════════════════════════════════════════
 // CONDICIONES DE ROMPIMIENTO (3 velas consecutivas en el mismo sentido)
