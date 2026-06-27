@@ -139,10 +139,11 @@ calcLotaje(equity, riskPct, slDist) =>
     pv > 0 and slDist > 0 ? montoRiesgo / (slDist * pv) : 0.0
 
 // Función para actualizar el SL dinámico en LONG (Compra)
-actualizarSlLong(precioHigh, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep, tSl, distSeguimiento, tRisk, beRR) =>
+actualizarSlLong(precioHigh, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep, tSl, distSeguimiento, tRisk, beRR, tTp) =>
     float nuevoSl = tSl
     int nuevoStep = tStep
     float nuevaDist = distSeguimiento
+    float nuevoTp = tTp
     
     float TP1 = tEnt + tpTercio
     float TP2 = tEnt + (tpTercio * 2.0)
@@ -156,31 +157,37 @@ actualizarSlLong(precioHigh, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep,
         if nuevoStep < 1
             nuevoStep := 1
             
-    // 2. Niveles por tercios
-    if precioHigh >= (TP2 + (tpDist / 6.0))
-        if tStep < 3
-            nuevoStep := 3
-            nuevoSl   := tEnt + (tpDist * 0.5)
-            nuevaDist := precioHigh - nuevoSl
-        else
-            if not na(distSeguimiento)
-                float trailingSl = precioHigh - distSeguimiento
-                if trailingSl > tSl
-                    nuevoSl := trailingSl
-    else if precioHigh >= TP2
-        nuevoSl := math.max(nuevoSl, TP1)
-        if nuevoStep < 2
-            nuevoStep := 2
-    else if precioHigh >= TP1
-        nuevoSl := math.max(nuevoSl, SL1)
+    // 2. Regla especial: si el SL > TP3 * (4/6) y el precio < TP3 entonces borras el TP final y el TP3
+    float slLimite = tEnt + tpDist * (4.0 / 6.0)
+    if not na(nuevoTp) and nuevoSl > slLimite and precioHigh < TP3
+        nuevoTp := na
+    else
+        // 3. Niveles por tercios
+        if precioHigh >= (TP2 + (tpDist / 6.0))
+            if tStep < 3
+                nuevoStep := 3
+                nuevoSl   := tEnt + (tpDist * 0.5)
+                nuevaDist := precioHigh - nuevoSl
+            else
+                if not na(distSeguimiento)
+                    float trailingSl = precioHigh - distSeguimiento
+                    if trailingSl > tSl
+                        nuevoSl := trailingSl
+        else if precioHigh >= TP2
+            nuevoSl := math.max(nuevoSl, TP1)
+            if nuevoStep < 2
+                nuevoStep := 2
+        else if precioHigh >= TP1
+            nuevoSl := math.max(nuevoSl, SL1)
             
-    [nuevoSl, nuevoStep, nuevaDist]
+    [nuevoSl, nuevoStep, nuevaDist, nuevoTp]
 
 // Función para actualizar el SL dinámico en SHORT (Venta)
-actualizarSlShort(precioLow, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep, tSl, distSeguimiento, tRisk, beRR) =>
+actualizarSlShort(precioLow, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep, tSl, distSeguimiento, tRisk, beRR, tTp) =>
     float nuevoSl = tSl
     int nuevoStep = tStep
     float nuevaDist = distSeguimiento
+    float nuevoTp = tTp
     
     float TP1 = tEnt - tpTercio
     float TP2 = tEnt - (tpTercio * 2.0)
@@ -194,25 +201,30 @@ actualizarSlShort(precioLow, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep,
         if nuevoStep < 1
             nuevoStep := 1
             
-    // 2. Niveles por tercios
-    if precioLow <= (TP2 - (tpDist / 6.0))
-        if tStep < 3
-            nuevoStep := 3
-            nuevoSl   := tEnt - (tpDist * 0.5)
-            nuevaDist := nuevoSl - precioLow
-        else
-            if not na(distSeguimiento)
-                float trailingSl = precioLow + distSeguimiento
-                if trailingSl < tSl
-                    nuevoSl := trailingSl
-    else if precioLow <= TP2
-        nuevoSl := math.min(nuevoSl, TP1)
-        if nuevoStep < 2
-            nuevoStep := 2
-    else if precioLow <= TP1
-        nuevoSl := math.min(nuevoSl, SL1)
+    // 2. Regla especial: si el SL > TP3 * (4/6) y el precio < TP3 entonces borras el TP final y el TP3
+    float slLimite = tEnt - tpDist * (4.0 / 6.0)
+    if not na(nuevoTp) and nuevoSl < slLimite and precioLow > TP3
+        nuevoTp := na
+    else
+        // 3. Niveles por tercios
+        if precioLow <= (TP2 - (tpDist / 6.0))
+            if tStep < 3
+                nuevoStep := 3
+                nuevoSl   := tEnt - (tpDist * 0.5)
+                nuevaDist := nuevoSl - precioLow
+            else
+                if not na(distSeguimiento)
+                    float trailingSl = precioLow + distSeguimiento
+                    if trailingSl < tSl
+                        nuevoSl := trailingSl
+        else if precioLow <= TP2
+            nuevoSl := math.min(nuevoSl, TP1)
+            if nuevoStep < 2
+                nuevoStep := 2
+        else if precioLow <= TP1
+            nuevoSl := math.min(nuevoSl, SL1)
             
-    [nuevoSl, nuevoStep, nuevaDist]
+    [nuevoSl, nuevoStep, nuevaDist, nuevoTp]
 
 // ══════════════════════════════════════════════════════════════════════════
 // VELAS HEIKIN-ASHI SUAVIZADAS (SHA)
@@ -320,20 +332,22 @@ if strategy.position_size != 0 and not na(tRisk) and not na(tTp)
     if strategy.position_size > 0
         // Actualización LONG
         float viejoSl = tSl
-        [nuevoSl, nuevoStep, nuevaDist] = actualizarSlLong(high, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep, tSl, distSeguimiento, tRisk, beRR)
+        [nuevoSl, nuevoStep, nuevaDist, nuevoTp] = actualizarSlLong(high, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep, tSl, distSeguimiento, tRisk, beRR, tTp)
         tSl             := nuevoSl
         tStep           := nuevoStep
         distSeguimiento := nuevaDist
+        tTp             := nuevoTp
         if tSl != viejoSl
             trailMoved := true
 
     if strategy.position_size < 0
         // Actualización SHORT
         float viejoSl = tSl
-        [nuevoSl, nuevoStep, nuevaDist] = actualizarSlShort(low, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep, tSl, distSeguimiento, tRisk, beRR)
+        [nuevoSl, nuevoStep, nuevaDist, nuevoTp] = actualizarSlShort(low, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep, tSl, distSeguimiento, tRisk, beRR, tTp)
         tSl             := nuevoSl
         tStep           := nuevoStep
         distSeguimiento := nuevaDist
+        tTp             := nuevoTp
         if tSl != viejoSl
             trailMoved := true
 
