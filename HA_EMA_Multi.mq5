@@ -213,7 +213,7 @@ void OnTick()
      }
      
    // 4. COPIAR VALORES DE EMAs
-   double ema_fast_arr[2], ema_slow_arr[2], ema200_arr[2];
+   double ema_fast_arr[], ema_slow_arr[], ema200_arr[];
    ArraySetAsSeries(ema_fast_arr, true);
    ArraySetAsSeries(ema_slow_arr, true);
    ArraySetAsSeries(ema200_arr, true);
@@ -364,7 +364,7 @@ void GestionarPosiciones()
          double open_p  = PositionGetDouble(POSITION_PRICE_OPEN);
          double curr_sl = PositionGetDouble(POSITION_SL);
          double curr_tp = PositionGetDouble(POSITION_TP);
-         double type    = PositionGetInteger(POSITION_TYPE);
+         long type      = PositionGetInteger(POSITION_TYPE);
          
          double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
          double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
