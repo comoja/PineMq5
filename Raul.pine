@@ -64,18 +64,11 @@ emaSlow = ta.ema(close, emaSlowPer)
 plot(emaFast, "EMA Rápida", color=color.green, linewidth=2)
 plot(emaSlow, "EMA Lenta",  color=color.red,   linewidth=2)
 
-// Dibujar canales del rango de referencia en el gráfico
-var line maxLine = na
-var line minLine = na
-var line midLine = na
-
-if barstate.islast
-    line.delete(maxLine)
-    line.delete(minLine)
-    line.delete(midLine)
-    maxLine := line.new(bar_index - rangoVelas - 3, rangoMax, bar_index, rangoMax, color=color.red, width=2, style=line.style_dashed)
-    minLine := line.new(bar_index - rangoVelas - 3, rangoMin, bar_index, rangoMin, color=color.green, width=2, style=line.style_dashed)
-    midLine := line.new(bar_index - rangoVelas - 3, rangoMedio, bar_index, rangoMedio, color=color.orange, width=1, style=line.style_dotted)
+// Dibujar canales y sombreado del rango de referencia en el gráfico histórico
+pMax = plot(rangoMax, "Techo Rango (Máx 20 Velas)", color=color.new(color.red, 50), linewidth=1, style=plot.style_line)
+pMin = plot(rangoMin, "Piso Rango (Mín 20 Velas)",  color=color.new(color.green, 50), linewidth=1, style=plot.style_line)
+plot(rangoMedio, "Mitad Rango (50%)", color=color.new(color.orange, 60), linewidth=1, style=plot.style_line, linestyle=plot.linestyle_dotted)
+fill(pMax, pMin, color=color.new(color.yellow, 97), title="Zona de Rango")
 
 // ══════════════════════════════════════════════════════════════════════════
 // CONDICIONES DE ROMPIMIENTO (3 velas consecutivas en el mismo sentido)
