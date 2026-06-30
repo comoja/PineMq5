@@ -24,6 +24,11 @@ input double risk_usd      = 5.0;         // Dólares a arriesgar por trade
 input double rr            = 0.90;        // Relación RR para el BE / Target inicial
 input int    magic_number  = 83095;       // Magic number único de esta estrategia
 
+input group "--- NOTIFICACIONES DE TELEGRAM ---"
+input bool   InpUseTelegram = false;       // Enviar alertas a Telegram
+input string InpBotToken    = "";          // Token del Bot de Telegram
+input string InpChatID      = "";          // Chat ID del Usuario/Canal
+
 input group "--- HORARIO DE RANGO (HORA DEL BROKER) ---"
 input int    start_hour    = 16;          // Hora de inicio del rango (Broker)
 input int    start_minute  = 30;          // Minuto de inicio del rango (Broker)
@@ -216,6 +221,9 @@ void OnTick()
                   trades_count++;
                   t_ent = close_curr;
                   trail_step = dist_puntos / 3.0;
+                  string msg = StringFormat("🔔 BreakoutNY - Nueva Compra (BUY) en %s\nPrecio: %s\nStop Loss: %s\nTake Profit: %s\nLote: %s", 
+                                            _Symbol, DoubleToString(close_curr, _Digits), DoubleToString(current_sl, _Digits), DoubleToString(target_p, _Digits), DoubleToString(pos_size, 2));
+                  EnviarMensajeTelegram(msg);
                  }
               }
             else
@@ -225,6 +233,9 @@ void OnTick()
                   trades_count++;
                   t_ent = close_curr;
                   trail_step = dist_puntos / 3.0;
+                  string msg = StringFormat("🔔 BreakoutNY - Nueva Venta (SELL) en %s\nPrecio: %s\nStop Loss: %s\nTake Profit: %s\nLote: %s", 
+                                            _Symbol, DoubleToString(close_curr, _Digits), DoubleToString(current_sl, _Digits), DoubleToString(target_p, _Digits), DoubleToString(pos_size, 2));
+                  EnviarMensajeTelegram(msg);
                  }
               }
            }
@@ -313,4 +324,39 @@ void DibujarTabla(double daily_profit)
    texto += "Estado: " + (panic_close ? "🚨 PÁNICO ACTIVADO" : "🟢 OPERANDO AUTO");
    
    Comment(texto);
+  }
+
+//+------------------------------------------------------------------+
+//| Enviar mensaje a Telegram                                        |
+//+------------------------------------------------------------------+
+void EnviarMensajeTelegram(string message)
+  {
+   if(!InpUseTelegram || InpBotToken == "" || InpChatID == "")
+      return;
+      
+   if(MQLInfoInteger(MQL_TESTER))
+     {
+      Print("[Telegram Simulation] ", message);
+      return;
+     }
+      
+   string url = "https://api.telegram.org/bot" + InpBotToken + "/sendMessage";
+   string headers = "Content-Type: application/x-www-form-urlencoded\r\n";
+   string postData = "chat_id=" + InpChatID + "&text=" + message;
+   
+   char data[];
+   char result[];
+   string resHeaders;
+   
+   StringToCharArray(postData, data);
+   
+   int res = WebRequest("POST", url, headers, 3000, data, result, resHeaders);
+   if(res == 200)
+     {
+      Print("Mensaje de Telegram enviado con éxito.");
+     }
+   else
+     {
+      Print("Error al enviar mensaje a Telegram. Código: ", GetLastError());
+     }
   }

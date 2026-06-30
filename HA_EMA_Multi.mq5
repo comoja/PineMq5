@@ -31,17 +31,18 @@ input group "--- PERFIL DE CONFIGURACIÓN ---"
 input ENUM_ASSET_PROFILE InpAssetProfile = PROFILE_AUTO; // Perfil de Activo
 
 input group "--- GESTIÓN DE RIESGO ---"
-input double InpRiskPerc          = 1.0;   // Riesgo por operación (%)
-input bool   InpUseFixedLot       = false; // ¿Usar Lote Fijo? (True=Fijo, False=Riesgo %)
-input double InpFixedLotValue     = 0.01;  // Valor del Lote Fijo
-input double InpMaxRiskPerc       = 5.0;   // Riesgo Máximo Permitido por Trade (% Balance)
-input bool   InpUseTP             = true;  // Usar Take Profit Fijo
-input double InpRRRatio           = 3.3;   // Relación R:R
-input bool   InpUseBE             = true;  // Usar Break-Even (Mover a Entrada)
-input double InpBERatio           = 1.5;   // Multiplicador R:R para Break-Even
-input bool   InpUseTPChase        = true;  // Usar Persecución de TP (TP Chasing)
-input double InpTPChasePts        = 12.0;  // Distancia de Persecución TP (Pts)
-input double InpTPChaseOffset     = 12.0;  // Avance del TP (Pts)
+input double InpRiskPerc       = 1.0;   // Riesgo por operación (%)
+input bool   InpUseFixedLot    = false; // ¿Usar Lote Fijo? (True=Fijo, False=Riesgo %)
+input double InpFixedLotValue  = 0.01;  // Lote Fijo (Si usar Lote Fijo = true)
+input double InpMaxRiskPerc    = 5.0;   // Riesgo Máximo Permitido (%)
+input int    InpMaxSpread      = 40;    // Spread Máximo Permitido (Puntos, 0 para desactivar)
+input bool   InpUseTP          = true;  // Usar Take Profit Fijo
+input double InpRRRatio        = 3.3;   // Relación R:R
+input bool   InpUseBE          = true;  // Usar Break-Even (Mover a Entrada)
+input double InpBERatio        = 1.5;   // Multiplicador R:R para Break-Even
+input bool   InpUseTPChase     = true;  // Usar Persecución de TP (TP Chasing)
+input double InpTPChasePts     = 12.0;  // Distancia de Persecución TP (Pts)
+input double InpTPChaseOffset  = 12.0;  // Avance del TP (Pts)
 
 input group "--- FILTROS DE EJECUCIÓN PROFESIONAL ---"
 input double InpMaxSpreadPoints   = 50.0;  // Spread Máximo Permitido (Puntos)
@@ -271,9 +272,12 @@ void OnTick()
       return; // Evaluar solo al cierre/apertura de vela
       
    // 3. FILTRO DE SPREAD MÁXIMO
-   double spread = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
-   if(spread > InpMaxSpreadPoints)
-      return; // Evitar entrar con spreads excesivos (noticias, aperturas...)
+   if(InpMaxSpread > 0)
+     {
+      double spread = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+      if(spread > InpMaxSpread)
+         return; 
+     }
       
    // 4. COPIAR VALORES DE INDICADORES (Se copian 4 elementos para analizar j=0, 1, 2)
    double ema_fast_arr[], ema_slow_arr[], ema200_arr[], atr_arr[], adx_arr[];
@@ -361,80 +365,47 @@ void OnTick()
         }
       double sl_buffer = m_sl_buffer_pts; 
 
-      // Obtener Stops Level del Broker
       double stops_level = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * _Point;
 
       if(trigger_long)
         {
          double sl = lowest_low - sl_buffer;
-         double risk = ask - sl;
-         
-         // Validar distancia mínima contra Stops Level
-         if(risk < stops_level)
-            risk = stops_level;
-         
-         sl = ask - risk;
          if(ask - sl <= 0) sl = ask - _Point;
          
-         double lot = CalcularLote(risk);
-         if(lot <= 0) return;
-         
-         // Validación de Sobre-exposición (Filtro de Riesgo Máximo)
-         double tick_val = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
-         double tick_sz  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-         if(tick_val > 0 && tick_sz > 0)
+         double risk = ask - sl;
+         if(risk < stops_level)
            {
-            double risk_in_money = (risk / tick_sz) * tick_val * lot;
-            double balance = AccountInfoDouble(ACCOUNT_BALANCE);
-            double max_risk_money = balance * (InpMaxRiskPerc / 100.0);
-            
-            if(risk_in_money > max_risk_money)
-              {
-               Print("Operación COMPRA cancelada: El riesgo de ", DoubleToString(risk_in_money, 2), " USD supera el límite máximo permitido de ", DoubleToString(max_risk_money, 2), " USD (", InpMaxRiskPerc, "% del balance).");
-               return;
-              }
+            sl = ask - stops_level;
+            risk = stops_level;
            }
          
          double tp = InpUseTP ? (ask + risk * m_rr_ratio) : 0.0;
-         if(m_trade.Buy(lot, _Symbol, ask, sl, tp, "HA_EMA Long"))
+         double lot = CalcularLote(risk);
+         
+         if(lot > 0)
            {
+            m_trade.Buy(lot, _Symbol, ask, sl, tp, "HA_EMA Long");
             m_last_bar_time = current_bar_time;
            }
         }
       else if(trigger_short)
         {
          double sl = highest_high + sl_buffer;
-         double risk = sl - bid;
-         
-         // Validar distancia mínima contra Stops Level
-         if(risk < stops_level)
-            risk = stops_level;
-         
-         sl = bid + risk;
          if(sl - bid <= 0) sl = bid + _Point;
          
-         double lot = CalcularLote(risk);
-         if(lot <= 0) return;
-         
-         // Validación de Sobre-exposición (Filtro de Riesgo Máximo)
-         double tick_val = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
-         double tick_sz  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-         if(tick_val > 0 && tick_sz > 0)
+         double risk = sl - bid;
+         if(risk < stops_level)
            {
-            double risk_in_money = (risk / tick_sz) * tick_val * lot;
-            double balance = AccountInfoDouble(ACCOUNT_BALANCE);
-            double max_risk_money = balance * (InpMaxRiskPerc / 100.0);
-            
-            if(risk_in_money > max_risk_money)
-              {
-               Print("Operación VENTAS cancelada: El riesgo de ", DoubleToString(risk_in_money, 2), " USD supera el límite máximo permitido de ", DoubleToString(max_risk_money, 2), " USD (", InpMaxRiskPerc, "% del balance).");
-               return;
-              }
+            sl = bid + stops_level;
+            risk = stops_level;
            }
          
          double tp = InpUseTP ? (bid - risk * m_rr_ratio) : 0.0;
-         if(m_trade.Sell(lot, _Symbol, bid, sl, tp, "HA_EMA Short"))
+         double lot = CalcularLote(risk);
+         
+         if(lot > 0)
            {
+            m_trade.Sell(lot, _Symbol, bid, sl, tp, "HA_EMA Short");
             m_last_bar_time = current_bar_time;
            }
         }

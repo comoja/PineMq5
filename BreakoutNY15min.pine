@@ -19,15 +19,13 @@ strategy('BreakoutNY 15min', overlay=true,
 // ─────────────────────────────────────────────
 // INPUTS
 // ─────────────────────────────────────────────
-input group "--- CONFIGURACIÓN GENERAL ---"
-float rr         = input.float(0.90, "RR para TP", minval=0.1, step=0.1)
-int   max_trades = input.int(3,    "Máx trades por día", minval=1, maxval=10)
+float rr         = input.float(0.90, "RR para TP", minval=0.1, step=0.1, group="--- CONFIGURACIÓN GENERAL ---")
+int   max_trades = input.int(3,    "Máx trades por día", minval=1, maxval=10, group="--- CONFIGURACIÓN GENERAL ---")
 
-input group "--- HORARIO DEL RANGO (hora del broker) ---"
-int start_hour   = input.int(16, "Hora inicio",   minval=0, maxval=23)
-int start_min_i  = input.int(30, "Minuto inicio", minval=0, maxval=59)
-int end_hour     = input.int(16, "Hora fin",      minval=0, maxval=23)
-int end_min_i    = input.int(45, "Minuto fin",    minval=0, maxval=59)
+int start_hour   = input.int(16, "Hora inicio",   minval=0, maxval=23, group="--- HORARIO DEL RANGO (hora del broker) ---")
+int start_min_i  = input.int(30, "Minuto inicio", minval=0, maxval=59, group="--- HORARIO DEL RANGO (hora del broker) ---")
+int end_hour     = input.int(16, "Hora fin",      minval=0, maxval=23, group="--- HORARIO DEL RANGO (hora del broker) ---")
+int end_min_i    = input.int(45, "Minuto fin",    minval=0, maxval=59, group="--- HORARIO DEL RANGO (hora del broker) ---")
 
 // ─────────────────────────────────────────────
 // INDICADORES
