@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Comoja / PineMq5"
 #property link      "https://github.com/comoja/PineMq5"
-#property version   "1.10"
+#property version   "1.20"
 #property strict
 
 // Incluir librería estándar de trade
@@ -31,42 +31,48 @@ input group "--- PERFIL DE CONFIGURACIÓN ---"
 input ENUM_ASSET_PROFILE InpAssetProfile = PROFILE_AUTO; // Perfil de Activo
 
 input group "--- GESTIÓN DE RIESGO ---"
-input double InpRiskPerc       = 1.0;   // Riesgo por operación (%)
-input bool   InpUseTP          = true;  // Usar Take Profit Fijo
-input double InpRRRatio        = 3.3;   // Relación R:R
-input bool   InpUseBE          = true;  // Usar Break-Even (Mover a Entrada)
-input double InpBERatio        = 1.5;   // Multiplicador R:R para Break-Even
-input bool   InpUseTPChase     = true;  // Usar Persecución de TP (TP Chasing)
-input double InpTPChasePts     = 12.0;  // Distancia de Persecución TP (Pts)
-input double InpTPChaseOffset  = 12.0;  // Avance del TP (Pts)
+input double InpRiskPerc          = 1.0;   // Riesgo por operación (%)
+input bool   InpUseFixedLot       = false; // ¿Usar Lote Fijo? (True=Fijo, False=Riesgo %)
+input double InpFixedLotValue     = 0.01;  // Valor del Lote Fijo
+input double InpMaxRiskPerc       = 5.0;   // Riesgo Máximo Permitido por Trade (% Balance)
+input bool   InpUseTP             = true;  // Usar Take Profit Fijo
+input double InpRRRatio           = 3.3;   // Relación R:R
+input bool   InpUseBE             = true;  // Usar Break-Even (Mover a Entrada)
+input double InpBERatio           = 1.5;   // Multiplicador R:R para Break-Even
+input bool   InpUseTPChase        = true;  // Usar Persecución de TP (TP Chasing)
+input double InpTPChasePts        = 12.0;  // Distancia de Persecución TP (Pts)
+input double InpTPChaseOffset     = 12.0;  // Avance del TP (Pts)
+
+input group "--- FILTROS DE EJECUCIÓN PROFESIONAL ---"
+input double InpMaxSpreadPoints   = 50.0;  // Spread Máximo Permitido (Puntos)
 
 input group "--- PARÁMETROS MANUALES (Si perfil = Manual) ---"
-input string InpEmaTF          = "Auto"; // Temporalidad de EMAs
-input int    InpEmaFastLen     = 8;      // Período EMA Rápida manual
-input int    InpEmaSlowLen     = 22;     // Período EMA Lenta manual
-input int    InpSwingPeriod    = 8;      // Velas Swing High/Low manual
-input double InpSlBufPoints    = 0.3;    // Buffer SL manual (Puntos/Ticks)
-input bool   InpUseIMACD       = true;   // Usar iMACD manual
-input int    InpIMACDLen       = 35;     // Período iMACD manual
-input bool   InpUseEmaSpr      = true;   // Usar Abertura EMAs manual
-input double InpEmaSprMult     = 0.15;   // Abertura Mínima EMAs manual (× ATR)
-input bool   InpUseHaStr       = false;  // Fuerza Heikin-Ashi manual
-input bool   InpUseEma200      = true;   // Filtro EMA 200 manual
-input int    InpEma200Len      = 200;    // Período EMA 200 manual
-input bool   InpUseATRMin      = true;   // Filtro ATR Mínimo manual
-input double InpATRMinVal      = 3.5;    // ATR Mínimo manual (USD)
-input bool   InpUseADX         = true;   // Filtro ADX manual
-input double InpADXMin         = 22.0;   // ADX Mínimo manual
-input int    InpConfirmBars    = 1;      // Velas de Confirmación manual
-input int    InpHaColorLimit   = 6;      // Límite de Recencia de Color HA manual
+input string InpEmaTF             = "Auto"; // Temporalidad de EMAs
+input int    InpEmaFastLen        = 8;      // Período EMA Rápida manual
+input int    InpEmaSlowLen        = 22;     // Período EMA Lenta manual
+input int    InpSwingPeriod       = 8;      // Velas Swing High/Low manual
+input double InpSlBufPoints       = 0.3;    // Buffer SL manual (Puntos/Ticks)
+input bool   InpUseIMACD          = true;   // Usar iMACD manual
+input int    InpIMACDLen          = 35;     // Período iMACD manual
+input bool   InpUseEmaSpr         = true;   // Usar Abertura EMAs manual
+input double InpEmaSprMult        = 0.15;   // Abertura Mínima EMAs manual (× ATR)
+input bool   InpUseHaStr          = false;  // Fuerza Heikin-Ashi manual
+input bool   InpUseEma200         = true;   // Filtro EMA 200 manual
+input int    InpEma200Len         = 200;    // Período EMA 200 manual
+input bool   InpUseATRMin         = true;   // Filtro ATR Mínimo manual
+input double InpATRMinVal         = 3.5;    // ATR Mínimo manual (USD)
+input bool   InpUseADX            = true;   // Filtro ADX manual
+input double InpADXMin            = 22.0;   // ADX Mínimo manual
+input int    InpConfirmBars       = 1;      // Velas de Confirmación manual
+input int    InpHaColorLimit      = 6;      // Límite de Recencia de Color HA manual
 
 input group "--- CONTROL DE SESIÓN ---"
-input bool   InpUseSession     = true;  // Usar Sesión Horaria
-input int    InpStartHour      = 7;     // Hora de Inicio (UTC)
-input int    InpEndHour        = 17;    // Hora de Fin (UTC)
+input bool   InpUseSession        = true;  // Usar Sesión Horaria
+input int    InpStartHour         = 7;     // Hora de Inicio (UTC)
+input int    InpEndHour           = 17;    // Hora de Fin (UTC)
 
 input group "--- AJUSTES DE EJECUCIÓN ---"
-input ulong  InpMagicNumber    = 123456; // Número Mágico del EA
+input ulong  InpMagicNumber       = 123456; // Número Mágico del EA
 
 // ════════════════════════════════════════════════════════════════════
 // VARIABLES GLOBALES EFECTIVAS
@@ -264,7 +270,12 @@ void OnTick()
    if(current_bar_time == m_last_bar_time)
       return; // Evaluar solo al cierre/apertura de vela
       
-   // 3. COPIAR VALORES DE INDICADORES (Se copian 4 elementos para analizar j=0, 1, 2)
+   // 3. FILTRO DE SPREAD MÁXIMO
+   double spread = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+   if(spread > InpMaxSpreadPoints)
+      return; // Evitar entrar con spreads excesivos (noticias, aperturas...)
+      
+   // 4. COPIAR VALORES DE INDICADORES (Se copian 4 elementos para analizar j=0, 1, 2)
    double ema_fast_arr[], ema_slow_arr[], ema200_arr[], atr_arr[], adx_arr[];
    ArraySetAsSeries(ema_fast_arr, true);
    ArraySetAsSeries(ema_slow_arr, true);
@@ -278,10 +289,10 @@ void OnTick()
       CopyBuffer(h_atr_local, 0, 1, 4, atr_arr) < 4 ||
       CopyBuffer(h_adx, 0, 1, 4, adx_arr) < 4)
      {
-      return; // Error leyendo EMAs / Volatilidad
+      return; // Error leyendo datos
      }
    
-   // 4. COPIAR VELAS HEIKIN-ASHI LOCALES
+   // 5. COPIAR VELAS HEIKIN-ASHI LOCALES
    MqlRates rates[];
    ArraySetAsSeries(rates, true);
    if(CopyRates(_Symbol, _Period, 1, 40, rates) < 40)
@@ -301,7 +312,7 @@ void OnTick()
       ha[i].open  = (ha[i+1].open + ha[i+1].close) / 2.0;
      }
 
-   // 5. CALCULAR VALORES DEL IMPULSE MACD
+   // 6. CALCULAR VALORES DEL IMPULSE MACD
    double md_0 = 0.0, md_1 = 0.0, md_2 = 0.0;
    if(m_use_imacd)
      {
@@ -310,7 +321,7 @@ void OnTick()
       md_2 = CalcularIMACD(m_imacd_len, 2);
      }
 
-   // 6. COMPROBAR ALINEACIÓN DE CRUCES
+   // 7. COMPROBAR ALINEACIÓN DE CRUCES
    bool trigger_long = false;
    bool trigger_short = false;
    
@@ -334,7 +345,7 @@ void OnTick()
       trigger_short = is_short_aligned_0 && is_short_aligned_1 && !is_short_aligned_2;
      }
 
-   // 7. EJECUCIÓN DE ENTRADAS
+   // 8. EJECUCIÓN DE ENTRADAS
    if(PositionsTotal() == 0)
      {
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
@@ -348,35 +359,82 @@ void OnTick()
          if(rates[k].low < lowest_low) lowest_low = rates[k].low;
          if(rates[k].high > highest_high) highest_high = rates[k].high;
         }
-      double sl_buffer = m_sl_buffer_pts; // Pinescript buffer directo en puntos
+      double sl_buffer = m_sl_buffer_pts; 
+
+      // Obtener Stops Level del Broker
+      double stops_level = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * _Point;
 
       if(trigger_long)
         {
          double sl = lowest_low - sl_buffer;
+         double risk = ask - sl;
+         
+         // Validar distancia mínima contra Stops Level
+         if(risk < stops_level)
+            risk = stops_level;
+         
+         sl = ask - risk;
          if(ask - sl <= 0) sl = ask - _Point;
          
-         double risk = ask - sl;
-         double tp = InpUseTP ? (ask + risk * m_rr_ratio) : 0.0;
          double lot = CalcularLote(risk);
+         if(lot <= 0) return;
          
-         if(lot > 0)
+         // Validación de Sobre-exposición (Filtro de Riesgo Máximo)
+         double tick_val = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+         double tick_sz  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+         if(tick_val > 0 && tick_sz > 0)
            {
-            m_trade.Buy(lot, _Symbol, ask, sl, tp, "HA_EMA Long");
+            double risk_in_money = (risk / tick_sz) * tick_val * lot;
+            double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+            double max_risk_money = balance * (InpMaxRiskPerc / 100.0);
+            
+            if(risk_in_money > max_risk_money)
+              {
+               Print("Operación COMPRA cancelada: El riesgo de ", DoubleToString(risk_in_money, 2), " USD supera el límite máximo permitido de ", DoubleToString(max_risk_money, 2), " USD (", InpMaxRiskPerc, "% del balance).");
+               return;
+              }
+           }
+         
+         double tp = InpUseTP ? (ask + risk * m_rr_ratio) : 0.0;
+         if(m_trade.Buy(lot, _Symbol, ask, sl, tp, "HA_EMA Long"))
+           {
             m_last_bar_time = current_bar_time;
            }
         }
       else if(trigger_short)
         {
          double sl = highest_high + sl_buffer;
+         double risk = sl - bid;
+         
+         // Validar distancia mínima contra Stops Level
+         if(risk < stops_level)
+            risk = stops_level;
+         
+         sl = bid + risk;
          if(sl - bid <= 0) sl = bid + _Point;
          
-         double risk = sl - bid;
-         double tp = InpUseTP ? (bid - risk * m_rr_ratio) : 0.0;
          double lot = CalcularLote(risk);
+         if(lot <= 0) return;
          
-         if(lot > 0)
+         // Validación de Sobre-exposición (Filtro de Riesgo Máximo)
+         double tick_val = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+         double tick_sz  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+         if(tick_val > 0 && tick_sz > 0)
            {
-            m_trade.Sell(lot, _Symbol, bid, sl, tp, "HA_EMA Short");
+            double risk_in_money = (risk / tick_sz) * tick_val * lot;
+            double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+            double max_risk_money = balance * (InpMaxRiskPerc / 100.0);
+            
+            if(risk_in_money > max_risk_money)
+              {
+               Print("Operación VENTAS cancelada: El riesgo de ", DoubleToString(risk_in_money, 2), " USD supera el límite máximo permitido de ", DoubleToString(max_risk_money, 2), " USD (", InpMaxRiskPerc, "% del balance).");
+               return;
+              }
+           }
+         
+         double tp = InpUseTP ? (bid - risk * m_rr_ratio) : 0.0;
+         if(m_trade.Sell(lot, _Symbol, bid, sl, tp, "HA_EMA Short"))
+           {
             m_last_bar_time = current_bar_time;
            }
         }
@@ -392,101 +450,105 @@ void GestionarPosiciones()
    
    for(int i = PositionsTotal() - 1; i >= 0; i--)
      {
-      if(PositionGetSymbol(i) == _Symbol && PositionGetInteger(POSITION_MAGIC) == InpMagicNumber)
+      // Selección robusta mediante Ticket único para evitar fallos de indexación
+      ulong ticket = PositionGetTicket(i);
+      if(ticket > 0 && PositionSelectByTicket(ticket))
         {
-         ulong ticket = PositionGetInteger(POSITION_TICKET);
-         double open_p  = PositionGetDouble(POSITION_PRICE_OPEN);
-         double curr_sl = PositionGetDouble(POSITION_SL);
-         double curr_tp = PositionGetDouble(POSITION_TP);
-         long type      = PositionGetInteger(POSITION_TYPE);
-         
-         double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-         double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-         
-         double bar_high = iHigh(_Symbol, _Period, 0);
-         double bar_low  = iLow(_Symbol, _Period, 0);
-         
-         // 1. MOTOR DE GESTIÓN DINÁMICA: PERSECUCIÓN DE TAKE PROFIT (TP CHASING)
-         if(m_use_tp_chase && curr_tp > 0.0)
+         if(PositionGetString(POSITION_SYMBOL) == _Symbol && PositionGetInteger(POSITION_MAGIC) == InpMagicNumber)
            {
-            if(type == POSITION_TYPE_BUY)
+            double open_p  = PositionGetDouble(POSITION_PRICE_OPEN);
+            double curr_sl = PositionGetDouble(POSITION_SL);
+            double curr_tp = PositionGetDouble(POSITION_TP);
+            long type      = PositionGetInteger(POSITION_TYPE);
+            
+            double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+            double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+            
+            double bar_high = iHigh(_Symbol, _Period, 0);
+            double bar_low  = iLow(_Symbol, _Period, 0);
+            
+            // 1. MOTOR DE GESTIÓN DINÁMICA: PERSECUCIÓN DE TAKE PROFIT (TP CHASING)
+            if(m_use_tp_chase && curr_tp > 0.0)
               {
-               if((curr_tp - bar_high) <= m_tp_chase_pts)
+               if(type == POSITION_TYPE_BUY)
                  {
-                  double nuevo_tp = bar_high + m_tp_chase_offset;
-                  m_trade.PositionModify(ticket, curr_sl, nuevo_tp);
-                  Print("TP Chase activado para Long. Nuevo TP: ", nuevo_tp);
-                  curr_tp = nuevo_tp; // Actualizar variable local
+                  if((curr_tp - bar_high) <= m_tp_chase_pts)
+                    {
+                     double nuevo_tp = bar_high + m_tp_chase_offset;
+                     m_trade.PositionModify(ticket, curr_sl, nuevo_tp);
+                     Print("TP Chase activado para Long. Nuevo TP: ", nuevo_tp);
+                     curr_tp = nuevo_tp; // Actualizar variable local
+                    }
+                 }
+               else if(type == POSITION_TYPE_SELL)
+                 {
+                  if((bar_low - curr_tp) <= m_tp_chase_pts)
+                    {
+                     double nuevo_tp = bar_low - m_tp_chase_offset;
+                     m_trade.PositionModify(ticket, curr_sl, nuevo_tp);
+                     Print("TP Chase activado para Short. Nuevo TP: ", nuevo_tp);
+                     curr_tp = nuevo_tp; // Actualizar variable local
+                    }
                  }
               }
-            else if(type == POSITION_TYPE_SELL)
+            
+            double risk_inicial = MathAbs(open_p - curr_sl);
+            double step = risk_inicial / 5.0; // Quintos
+            
+            // 2. GESTIÓN DEL BREAK-EVEN
+            if(m_use_be && curr_sl != open_p)
               {
-               if((bar_low - curr_tp) <= m_tp_chase_pts)
+               if(type == POSITION_TYPE_BUY)
                  {
-                  double nuevo_tp = bar_low - m_tp_chase_offset;
-                  m_trade.PositionModify(ticket, curr_sl, nuevo_tp);
-                  Print("TP Chase activado para Short. Nuevo TP: ", nuevo_tp);
-                  curr_tp = nuevo_tp; // Actualizar variable local
+                  double recorrido = bid - open_p;
+                  if(recorrido >= (risk_inicial * m_be_ratio))
+                    {
+                     m_trade.PositionModify(ticket, open_p, curr_tp);
+                     Print("Break-even activado para Long.");
+                     curr_sl = open_p; // Actualizar local
+                    }
+                 }
+               else if(type == POSITION_TYPE_SELL)
+                 {
+                  double recorrido = open_p - ask;
+                  if(recorrido >= (risk_inicial * m_be_ratio))
+                    {
+                     m_trade.PositionModify(ticket, open_p, curr_tp);
+                     Print("Break-even activado para Short.");
+                     curr_sl = open_p; // Actualizar local
+                    }
                  }
               }
-           }
-         
-         double risk_inicial = MathAbs(open_p - curr_sl);
-         double step = risk_inicial / 5.0; // Quintos
-         
-         // 2. GESTIÓN DEL BREAK-EVEN
-         if(m_use_be && curr_sl != open_p)
-           {
+              
+            // 3. GESTIÓN DEL TRAILING STOP POR QUINTOS
             if(type == POSITION_TYPE_BUY)
               {
                double recorrido = bid - open_p;
-               if(recorrido >= (risk_inicial * m_be_ratio))
+               int niveles = (int)MathFloor(recorrido / step);
+               if(niveles > 0)
                  {
-                  m_trade.PositionModify(ticket, open_p, curr_tp);
-                  Print("Break-even activado para Long.");
-                  curr_sl = open_p; // Actualizar local
+                  double initial_sl = open_p - (step * 5.0);
+                  double nuevo_sl = initial_sl + (step * niveles);
+                  if(nuevo_sl > curr_sl)
+                    {
+                     m_trade.PositionModify(ticket, nuevo_sl, curr_tp);
+                     Print("Trailing Stop ajustado para Long: ", nuevo_sl);
+                    }
                  }
               }
             else if(type == POSITION_TYPE_SELL)
               {
                double recorrido = open_p - ask;
-               if(recorrido >= (risk_inicial * m_be_ratio))
+               int niveles = (int)MathFloor(recorrido / step);
+               if(niveles > 0)
                  {
-                  m_trade.PositionModify(ticket, open_p, curr_tp);
-                  Print("Break-even activado para Short.");
-                  curr_sl = open_p; // Actualizar local
-                 }
-              }
-           }
-           
-         // 3. GESTIÓN DEL TRAILING STOP POR QUINTOS
-         if(type == POSITION_TYPE_BUY)
-           {
-            double recorrido = bid - open_p;
-            int niveles = (int)MathFloor(recorrido / step);
-            if(niveles > 0)
-              {
-               double initial_sl = open_p - (step * 5.0);
-               double nuevo_sl = initial_sl + (step * niveles);
-               if(nuevo_sl > curr_sl)
-                 {
-                  m_trade.PositionModify(ticket, nuevo_sl, curr_tp);
-                  Print("Trailing Stop ajustado para Long: ", nuevo_sl);
-                 }
-              }
-           }
-         else if(type == POSITION_TYPE_SELL)
-           {
-            double recorrido = open_p - ask;
-            int niveles = (int)MathFloor(recorrido / step);
-            if(niveles > 0)
-              {
-               double initial_sl = open_p + (step * 5.0);
-               double nuevo_sl = initial_sl - (step * niveles);
-               if(nuevo_sl < curr_sl || curr_sl == 0.0)
-                 {
-                  m_trade.PositionModify(ticket, nuevo_sl, curr_tp);
-                  Print("Trailing Stop ajustado para Short: ", nuevo_sl);
+                  double initial_sl = open_p + (step * 5.0);
+                  double nuevo_sl = initial_sl - (step * niveles);
+                  if(nuevo_sl < curr_sl || curr_sl == 0.0)
+                    {
+                     m_trade.PositionModify(ticket, nuevo_sl, curr_tp);
+                     Print("Trailing Stop ajustado para Short: ", nuevo_sl);
+                    }
                  }
               }
            }
@@ -633,26 +695,37 @@ double CalcularIMACD(int len, int shift)
   }
 
 // ════════════════════════════════════════════════════════════════════
-// CALCULAR LOTE AUTOMÁTICO EN BASE A RIESGO PORCENTUAL
+// CALCULAR LOTE AUTOMÁTICO EN BASE A RIESGO PORCENTUAL O FIJO
 // ════════════════════════════════════════════════════════════════════
 double CalcularLote(double risk_dist_points)
   {
    if(risk_dist_points <= 0) return 0.0;
    
-   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
-   double risk_money = balance * (InpRiskPerc / 100.0);
-   
-   double tick_value = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
-   double tick_size  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
    double lot_step   = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
    double min_lot    = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    double max_lot    = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   double lot = 0.0;
    
-   if(tick_value <= 0 || tick_size <= 0) return min_lot;
-   
-   double risk_in_ticks = risk_dist_points / tick_size;
-   double lot = risk_money / (risk_in_ticks * tick_value);
-   
+   // 1. LOTE FIJO VS RIESGO PORCENTUAL
+   if(InpUseFixedLot)
+     {
+      lot = InpFixedLotValue;
+     }
+   else
+     {
+      double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+      double risk_money = balance * (InpRiskPerc / 100.0);
+      
+      double tick_value = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+      double tick_size  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+      
+      if(tick_value <= 0 || tick_size <= 0) return min_lot;
+      
+      double risk_in_ticks = risk_dist_points / tick_size;
+      lot = risk_money / (risk_in_ticks * tick_value);
+     }
+     
+   // Redondear al paso de lote permitido
    lot = MathFloor(lot / lot_step) * lot_step;
    
    if(lot < min_lot) lot = min_lot;
