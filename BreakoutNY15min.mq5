@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
 //|                                           BreakoutNY.mq5         |
-//|         Derivado del MASTER: BreakoutNY15min.pine                |
+//|         Derivado del MASTER: BreakoutNY5min.pine                |
 //+------------------------------------------------------------------+
 // ╔══════════════════════════════════════════════════════════════════╗
 // ║  FUNCIONES CRÍTICAS — deben mantenerse sincronizadas con .pine  ║
@@ -22,12 +22,18 @@ input group "--- CONFIGURACIÓN GENERAL ---"
 input bool   panic_close   = false;       // 🚨 BOTÓN DE PÁNICO
 input double risk_usd      = 5.0;         // Dólares a arriesgar por trade
 input double rr            = 0.90;        // Relación RR para el BE / Target inicial
+input int    max_trades    = 3;           // Máx trades por día
+input int    ema_period    = 200;         // Período EMA 200
 input int    magic_number  = 83095;       // Magic number único de esta estrategia
 
 input group "--- NOTIFICACIONES DE TELEGRAM ---"
 input bool   InpUseTelegram = false;       // Enviar alertas a Telegram
 input string InpBotToken    = "";          // Token del Bot de Telegram
 input string InpChatID      = "";          // Chat ID del Usuario/Canal
+
+input group "--- FILTROS DE ENTRADA / RANGO ---"
+input bool   use_imacd     = false;       // Usar Filtro Impulse MACD
+input int    imacd_len     = 34;          // Período Impulse MACD
 
 input group "--- HORARIO DE RANGO (CONVERTIDO A HORA DEL BROKER) ---"
 input int    start_hour    = 16;          // Hora inicio Broker (9:30 NY es 16:30 en Brokers UTC+2/+3)
@@ -44,6 +50,19 @@ double current_sl = 0.0;
 double profit_inicio_dia = 0.0;
 datetime ultimo_dia = 0;
 
+// PARÁMETROS EFECTIVOS PERSONALIZABLES POR INSTRUMENTO
+double effective_rr;
+int    effective_max_trades;
+int    effective_ema_period;
+
+// HANDLES DE INDICADORES ADICIONALES (IMPULSE MACD)
+int    handle_imacd_ema1 = INVALID_HANDLE;
+int    handle_imacd_ema2 = INVALID_HANDLE;
+int    handle_imacd_hi   = INVALID_HANDLE;
+int    handle_imacd_lo   = INVALID_HANDLE;
+bool   imacd_long_ok     = true;
+bool   imacd_short_ok    = true;
+
 // VARIABLES PARA EL TRAIL DINÁMICO POR QUINTOS
 double t_ent = 0.0;       // Precio de entrada real
 double trail_step = 0.0;  // 1/5 de la distancia Entrada-SL en puntos
@@ -53,11 +72,58 @@ double trail_step = 0.0;  // 1/5 de la distancia Entrada-SL en puntos
 //+------------------------------------------------------------------+
 int OnInit()
   {
-   handle_ema = iMA(_Symbol, _Period, 200, 0, MODE_EMA, PRICE_CLOSE);
+   // Autodetección de activos
+   string symbol_lower = _Symbol;
+   StringToLower(symbol_lower);
+   bool is_nasdaq = (StringFind(symbol_lower, "nas") >= 0 || StringFind(symbol_lower, "us100") >= 0 || StringFind(symbol_lower, "nq") >= 0);
+   bool is_gold   = (StringFind(symbol_lower, "xau") >= 0 || StringFind(symbol_lower, "gold") >= 0);
+   bool is_us30   = (StringFind(symbol_lower, "us30") >= 0 || StringFind(symbol_lower, "dow") >= 0 || StringFind(symbol_lower, "ym") >= 0);
+
+   // Valores por defecto
+   effective_rr         = rr;
+   effective_max_trades = max_trades;
+   effective_ema_period = ema_period;
+
+   // Personalización por instrumento
+   if(is_nasdaq)
+     {
+      effective_rr         = 1.2;
+      effective_max_trades = 2;
+      effective_ema_period = 150;
+     }
+   else if(is_gold)
+     {
+      effective_rr         = 1.5;
+      effective_max_trades = 2;
+      effective_ema_period = 200;
+     }
+   else if(is_us30)
+     {
+      effective_rr         = 1.0;
+      effective_max_trades = 3;
+      effective_ema_period = 200;
+     }
+
+   handle_ema = iMA(_Symbol, _Period, effective_ema_period, 0, MODE_EMA, PRICE_CLOSE);
    if(handle_ema == INVALID_HANDLE)
      {
-      Print("Error al crear el handle de la EMA 200.");
+      Print("Error al crear el handle de la EMA.");
       return(INIT_FAILED);
+     }
+
+   // Inicializar handles de Impulse MACD si está activo
+   if(use_imacd)
+     {
+      handle_imacd_ema1 = iMA(_Symbol, _Period, imacd_len, 0, MODE_EMA, PRICE_TYPICAL);
+      handle_imacd_ema2 = iMA(_Symbol, _Period, imacd_len, 0, MODE_EMA, handle_imacd_ema1);
+      handle_imacd_hi   = iMA(_Symbol, _Period, imacd_len, 0, MODE_SMMA, PRICE_HIGH);
+      handle_imacd_lo   = iMA(_Symbol, _Period, imacd_len, 0, MODE_SMMA, PRICE_LOW);
+      if(handle_imacd_ema1 == INVALID_HANDLE || handle_imacd_ema2 == INVALID_HANDLE || 
+         handle_imacd_hi == INVALID_HANDLE || handle_imacd_lo == INVALID_HANDLE)
+        {
+         Print("Error al crear los handles del Impulse MACD.");
+         return(INIT_FAILED);
+        }
      }
      
    trade.SetExpertMagicNumber(magic_number);
@@ -71,6 +137,10 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    IndicatorRelease(handle_ema);
+   if(handle_imacd_ema1 != INVALID_HANDLE) IndicatorRelease(handle_imacd_ema1);
+   if(handle_imacd_ema2 != INVALID_HANDLE) IndicatorRelease(handle_imacd_ema2);
+   if(handle_imacd_hi != INVALID_HANDLE)   IndicatorRelease(handle_imacd_hi);
+   if(handle_imacd_lo != INVALID_HANDLE)   IndicatorRelease(handle_imacd_lo);
    Comment("");
   }
 
@@ -179,19 +249,45 @@ void OnTick()
    ArraySetAsSeries(ema_vals, true);
    if(CopyBuffer(handle_ema, 0, 0, 1, ema_vals) < 1) return;
    double ema_trend = ema_vals[0];
+    // Evaluar Impulse MACD si está activo
+    imacd_long_ok  = true;
+    imacd_short_ok = true;
+    if(use_imacd && handle_imacd_ema1 != INVALID_HANDLE && handle_imacd_ema2 != INVALID_HANDLE && 
+       handle_imacd_hi != INVALID_HANDLE && handle_imacd_lo != INVALID_HANDLE)
+      {
+       double ema1_val[], ema2_val[], hi_val[], lo_val[];
+       ArraySetAsSeries(ema1_val, true);
+       ArraySetAsSeries(ema2_val, true);
+       ArraySetAsSeries(hi_val, true);
+       ArraySetAsSeries(lo_val, true);
+       
+       if(CopyBuffer(handle_imacd_ema1, 0, 0, 1, ema1_val) > 0 &&
+          CopyBuffer(handle_imacd_ema2, 0, 0, 1, ema2_val) > 0 &&
+          CopyBuffer(handle_imacd_hi, 0, 0, 1, hi_val) > 0 &&
+          CopyBuffer(handle_imacd_lo, 0, 0, 1, lo_val) > 0)
+         {
+          double mi = 2.0 * ema1_val[0] - ema2_val[0]; // ZLEMA
+          double md = 0.0;
+          if(mi > hi_val[0])      md = mi - hi_val[0];
+          else if(mi < lo_val[0]) md = mi - lo_val[0];
+          
+          imacd_long_ok  = (md > 0.0);
+          imacd_short_ok = (md < 0.0);
+         }
+      }
 
    int  pos_type     = GetOwnPositionType(); // -1=ninguna, 0=BUY, 1=SELL
    bool has_position = (pos_type != -1);
 
-   if(!in_sess && r_high > 0.0 && !has_position && trades_count < 3)
+   if(!in_sess && r_high > 0.0 && !has_position && trades_count < effective_max_trades)
      {
       bool body_up = (close_curr > r_high);
       bool body_dn = (close_curr < r_low);
       
       // body_up: solo abre LONG si NO hay ya un SHORT contrario
       // body_dn: solo abre SHORT si NO hay ya un LONG contrario
-      bool try_long  = body_up && close_curr > ema_trend && pos_type != POSITION_TYPE_SELL;
-      bool try_short = body_dn && close_curr < ema_trend && pos_type != POSITION_TYPE_BUY;
+      bool try_long  = body_up && close_curr > ema_trend && pos_type != POSITION_TYPE_SELL && imacd_long_ok;
+      bool try_short = body_dn && close_curr < ema_trend && pos_type != POSITION_TYPE_BUY && imacd_short_ok;
 
       if(try_long || try_short)
         {
@@ -211,8 +307,8 @@ void OnTick()
             if(pos_size < min_lot) pos_size = min_lot;
             if(pos_size > max_lot) pos_size = max_lot;
 
-            double target_p = try_long ? (close_curr + dist_puntos * rr)
-                                       : (close_curr - dist_puntos * rr);
+            double target_p = try_long ? (close_curr + dist_puntos * effective_rr)
+                                       : (close_curr - dist_puntos * effective_rr);
 
             if(try_long)
               {
@@ -315,13 +411,15 @@ void CerrarTodo()
 
 void DibujarTabla(double daily_profit)
   {
-   string texto = "=== PANEL DE CONTROL NY ===\n";
+   string texto = "=== PANEL DE CONTROL NY (5M) ===\n";
    texto += "Profit Hoy: " + DoubleToString(daily_profit, 2) + " USD\n";
-   texto += "Trades Realizados: " + IntegerToString(trades_count) + " / 3\n";
+   texto += "Trades Realizados: " + IntegerToString(trades_count) + " / " + IntegerToString(effective_max_trades) + "\n";
    texto += "Rango Alto: " + DoubleToString(r_high, _Digits) + "\n";
    texto += "Rango Bajo: " + DoubleToString(r_low, _Digits) + "\n";
    texto += "Trail Step (Puntos): " + DoubleToString(trail_step, _Digits) + "\n"; 
-   texto += "Estado: " + (panic_close ? "🚨 PÁNICO ACTIVADO" : "🟢 OPERANDO AUTO");
+   texto += "Filtro iMACD: " + (use_imacd ? (imacd_long_ok ? "ALCISTA" : "BAJISTA") : "DESACTIVADO") + "\n";
+    texto += "Estado: " + (panic_close ? "🚨 PÁNICO ACTIVADO" : "🟢 OPERANDO AUTO") + "\n";
+    texto += "Calidad: " + (daily_profit >= 0.0 ? "🟢 BUENA" : "🔴 MEJORABLE");
    
    Comment(texto);
   }
