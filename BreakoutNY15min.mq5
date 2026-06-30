@@ -8,7 +8,7 @@
 // ║  [MQ5-CRITICAL #1]  GetOwnPositionType() → -1 / BUY / SELL     ║
 // ║  [MQ5-CRITICAL #2]  try_long bloquea si pos_type==SELL          ║
 // ║                     try_short bloquea si pos_type==BUY          ║
-// ║  [MQ5-CRITICAL #3]  Trailing por tercios: trail_step=dist/3     ║
+// ║  [MQ5-CRITICAL #3]  Trailing por quintos: trail_step=dist/5     ║
 // ║  [MQ5-CRITICAL #4]  Filtro magic_number en GetOwnPositionType() ║
 // ╚══════════════════════════════════════════════════════════════════╝
 #property copyright "AI Translator"
@@ -29,11 +29,11 @@ input bool   InpUseTelegram = false;       // Enviar alertas a Telegram
 input string InpBotToken    = "";          // Token del Bot de Telegram
 input string InpChatID      = "";          // Chat ID del Usuario/Canal
 
-input group "--- HORARIO DE RANGO (HORA DEL BROKER) ---"
-input int    start_hour    = 16;          // Hora de inicio del rango (Broker)
-input int    start_minute  = 30;          // Minuto de inicio del rango (Broker)
-input int    end_hour      = 16;          // Hora de fin del rango (Broker)
-input int    end_minute    = 45;          // Minuto de fin del rango (Broker)
+input group "--- HORARIO DE RANGO (CONVERTIDO A HORA DEL BROKER) ---"
+input int    start_hour    = 16;          // Hora inicio Broker (9:30 NY es 16:30 en Brokers UTC+2/+3)
+input int    start_minute  = 30;          // Minuto inicio Broker
+input int    end_hour      = 16;          // Hora fin Broker (9:45 NY es 16:45 en Brokers UTC+2/+3)
+input int    end_minute    = 45;          // Minuto fin Broker
 
 // --- VARIABLES GLOBALES E INDICADORES ---
 int    handle_ema;
@@ -44,9 +44,9 @@ double current_sl = 0.0;
 double profit_inicio_dia = 0.0;
 datetime ultimo_dia = 0;
 
-// VARIABLES PARA EL TRAIL DINÁMICO POR TERCIOS
+// VARIABLES PARA EL TRAIL DINÁMICO POR QUINTOS
 double t_ent = 0.0;       // Precio de entrada real
-double trail_step = 0.0;  // 1/3 de la distancia Entrada-SL en puntos
+double trail_step = 0.0;  // 1/5 de la distancia Entrada-SL en puntos
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -216,11 +216,11 @@ void OnTick()
 
             if(try_long)
               {
-               if(trade.Buy(pos_size, _Symbol, 0, current_sl, target_p, "8:30 NY Largo"))
+               if(trade.Buy(pos_size, _Symbol, 0, current_sl, target_p, "9:30 NY Largo"))
                  {
                   trades_count++;
                   t_ent = close_curr;
-                  trail_step = dist_puntos / 3.0;
+                  trail_step = dist_puntos / 5.0;
                   string msg = StringFormat("🔔 BreakoutNY - Nueva Compra (BUY) en %s\nPrecio: %s\nStop Loss: %s\nTake Profit: %s\nLote: %s", 
                                             _Symbol, DoubleToString(close_curr, _Digits), DoubleToString(current_sl, _Digits), DoubleToString(target_p, _Digits), DoubleToString(pos_size, 2));
                   EnviarMensajeTelegram(msg);
@@ -228,11 +228,11 @@ void OnTick()
               }
             else
               {
-               if(trade.Sell(pos_size, _Symbol, 0, current_sl, target_p, "8:30 NY Corto"))
+               if(trade.Sell(pos_size, _Symbol, 0, current_sl, target_p, "9:30 NY Corto"))
                  {
                   trades_count++;
                   t_ent = close_curr;
-                  trail_step = dist_puntos / 3.0;
+                  trail_step = dist_puntos / 5.0;
                   string msg = StringFormat("🔔 BreakoutNY - Nueva Venta (SELL) en %s\nPrecio: %s\nStop Loss: %s\nTake Profit: %s\nLote: %s", 
                                             _Symbol, DoubleToString(close_curr, _Digits), DoubleToString(current_sl, _Digits), DoubleToString(target_p, _Digits), DoubleToString(pos_size, 2));
                   EnviarMensajeTelegram(msg);
@@ -242,14 +242,14 @@ void OnTick()
         }
      }
 
-   // --- GESTIÓN DE TRAILING STOP POR TERCIOS COMPLETOS ---
+   // --- GESTIÓN DE TRAILING STOP POR QUINTOS COMPLETOS ---
    if(has_position)
      {
       if(t_ent == 0.0 || trail_step == 0.0)
         {
          t_ent = PositionGetDouble(POSITION_PRICE_OPEN);
          double sl_inicial = PositionGetDouble(POSITION_SL);
-         if(sl_inicial > 0) trail_step = MathAbs(t_ent - sl_inicial) / 3.0;
+         if(sl_inicial > 0) trail_step = MathAbs(t_ent - sl_inicial) / 5.0;
         }
 
       long   type               = PositionGetInteger(POSITION_TYPE);
@@ -265,7 +265,7 @@ void OnTick()
             
             if(niveles_superados > 0)
               {
-               double nuevo_sl = (t_ent - (trail_step * 3.0)) + (trail_step * niveles_superados);
+               double nuevo_sl = (t_ent - (trail_step * 5.0)) + (trail_step * niveles_superados);
                nuevo_sl = NormalizeDouble(nuevo_sl, _Digits);
                
                double current_tp = PositionGetDouble(POSITION_TP);
@@ -282,7 +282,7 @@ void OnTick()
             
             if(niveles_superados > 0)
               {
-               double nuevo_sl = (t_ent + (trail_step * 3.0)) - (trail_step * niveles_superados);
+               double nuevo_sl = (t_ent + (trail_step * 5.0)) - (trail_step * niveles_superados);
                nuevo_sl = NormalizeDouble(nuevo_sl, _Digits);
                
                double current_tp = PositionGetDouble(POSITION_TP);
