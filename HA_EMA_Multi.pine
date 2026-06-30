@@ -39,6 +39,12 @@ tpChasePtsIn = input.float(chase, "Distancia de Persecución TP (Pts)", minval=0
 tpChaseOffsetIn = input.float(chase, "Avance del TP (Pts)", minval=0.1, step=1.0, group=gpRisk,
                  tooltip="Distancia en puntos/ticks que se colocará el TP por delante del precio actual.")
 
+useFixedLotIn    = input.bool(false, "¿Usar Lote Fijo? (True=Fijo, False=Riesgo %)", group=gpRisk)
+fixedLotValIn    = input.float(0.01, "Valor de Lote Fijo (Lotes MT5, ej: 0.01)", group=gpRisk)
+maxRiskPercIn    = input.float(5.0, "Riesgo Máximo Permitido por Trade (% Balance)", minval=0.1, maxval=100.0, group=gpRisk)
+maxSpreadPointsIn = input.float(50.0, "Spread Máximo Permitido (Puntos)", minval=0.1, group=gpRisk)
+minStopsLevelIn  = input.float(0.0, "Mínimo Stop Level (Puntos)", minval=0.0, group=gpRisk)
+
 // ════════════════════════════════════════════════════════════════════
 // 3. INPUTS MANUALES (Solo si Perfil = Manual)
 // ════════════════════════════════════════════════════════════════════
@@ -129,6 +135,11 @@ tpChasePts     = tpChasePtsIn
 tpChaseOffset  = tpChaseOffsetIn
 useSession     = useSessionIn
 sessionStr     = sessionStrIn
+useFixedLot     = useFixedLotIn
+fixedLotValue   = fixedLotValIn
+maxRiskPerc     = maxRiskPercIn
+maxSpreadPoints = maxSpreadPointsIn
+minStopsLevel   = minStopsLevelIn
 
 if isGold
     slBufferPts    := 0.3
@@ -144,6 +155,7 @@ if isGold
     useHTF         := false
     useTPChase     := true,      tpChasePts     := 12.0,    tpChaseOffset := 12.0
     useSession     := true,      sessionStr     := "0700-1700"
+    useFixedLot    := false,     fixedLotValue  := 0.01,    maxRiskPerc   := 5.0,     minStopsLevel := 0.0
 else if isSilver
     slBufferPts   := 0.0
     rrRatio        := 2.5
@@ -158,6 +170,7 @@ else if isSilver
     useHTF         := false
     useTPChase     := true,     tpChasePts     := 2.0,    tpChaseOffset := 2.0
     useSession     := false
+    useFixedLot    := false,    fixedLotValue  := 0.01,    maxRiskPerc   := 5.0,     minStopsLevel := 0.0
 else if isBitcoin
     slBufferPts   := 0.0
     rrRatio        := 1.8
@@ -172,6 +185,7 @@ else if isBitcoin
     useHTF         := false
     useTPChase     := true,     tpChasePts     := 150.0,   tpChaseOffset := 150.0
     useSession     := false
+    useFixedLot    := false,    fixedLotValue  := 0.01,    maxRiskPerc   := 5.0,     minStopsLevel := 0.0
 else if isNasdaq
     slBufferPts   := 0.0
     rrRatio        := 1.5
@@ -186,6 +200,7 @@ else if isNasdaq
     useHTF         := false
     useTPChase     := true,     tpChasePts     := 15.0,    tpChaseOffset := 15.0
     useSession     := false
+    useFixedLot    := false,    fixedLotValue  := 0.01,    maxRiskPerc   := 5.0,     minStopsLevel := 0.0
 
 // --- VALIDACIÓN DE TEMPORALIDAD CORRECTA EN TRADINGVIEW ---
 correctTF = isGold ? "15" : isSilver ? "30" : isBitcoin ? "30" : isNasdaq ? "5" : ""
@@ -327,17 +342,25 @@ var float pendingSL = na
 var float pendingTP = na
 
 if triggerLong
-    pendingSL := lowestLow - slBuffer
+    slVal = lowestLow - slBuffer
+    risk = close - slVal
+    minSLDist = minStopsLevel * syminfo.mintick
+    if risk < minSLDist
+        risk := minSLDist
+    pendingSL := close - risk
     if (close - pendingSL) <= 0
         pendingSL := close - syminfo.mintick
-    risk = close - pendingSL
     pendingTP := useTP ? (close + risk * rrRatio) : na
 
 if triggerShort
-    pendingSL := highestHigh + slBuffer
+    slVal = highestHigh + slBuffer
+    risk = slVal - close
+    minSLDist = minStopsLevel * syminfo.mintick
+    if risk < minSLDist
+        risk := minSLDist
+    pendingSL := close + risk
     if (pendingSL - close) <= 0
         pendingSL := close + syminfo.mintick
-    risk = pendingSL - close
     pendingTP := useTP ? (close - risk * rrRatio) : na
 
 // ════════════════════════════════════════════════════════════════════
@@ -349,15 +372,30 @@ var float trailStep   = na
 var float entryP      = na
 var bool  beTriggered = false
 
-// Cálculo de lotaje en base a riesgo inicial
-riskAmount = strategy.equity * (riskPerc / 100.0)
-riskDist   = math.abs(close - pendingSL)
-qty         = riskAmount / (riskDist * syminfo.pointvalue)
+// Cálculo de lotaje en base a riesgo inicial o lote fijo
+contractSize = isGold ? 100.0 : isSilver ? 5000.0 : isBitcoin ? 1.0 : isNasdaq ? 1.0 : 100.0
+riskAmount   = strategy.equity * (riskPerc / 100.0)
+riskDist     = math.abs(close - pendingSL)
+qty          = 0.0
 
-if triggerLong and strategy.position_size == 0
+if useFixedLot
+    qty := fixedLotValue * contractSize
+else
+    qty := riskDist > 0 ? riskAmount / (riskDist * syminfo.pointvalue) : 0.0
+
+// 5. PROTECCIÓN DE SOBRE-EXPOSICIÓN (FILTRO DE RIESGO MÁXIMO)
+riskInMoney  = riskDist * qty * syminfo.pointvalue
+maxRiskMoney = strategy.equity * (maxRiskPerc / 100.0)
+riskMaxOk    = riskInMoney <= maxRiskMoney
+
+// Simulación de spread
+spread = 0.0
+spreadOk = spread <= maxSpreadPoints
+
+if triggerLong and strategy.position_size == 0 and riskMaxOk and spreadOk
     strategy.entry("Long", strategy.long, qty=qty)
 
-if triggerShort and strategy.position_size == 0
+if triggerShort and strategy.position_size == 0 and riskMaxOk and spreadOk
     strategy.entry("Short", strategy.short, qty=qty)
 
 // Apertura del trade detectada
