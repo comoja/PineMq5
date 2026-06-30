@@ -13,111 +13,184 @@ strategy("HA_EMA Multi (Gold & Silver)", overlay=true, initial_capital=450,
 // ════════════════════════════════════════════════════════════════════
 // 1. INPUTS DE PERFIL Y AUTODETECCIÓN
 // ════════════════════════════════════════════════════════════════════
-gp_prof       = "--- PERFIL DE CONFIGURACIÓN ---"
-asset_profile = input.string("Auto", "Perfil de Activo", options=["Auto", "Oro (XAUUSD)", "Plata (XAGUSD)", "Manual"], group=gp_prof,
-                 tooltip="Auto: detecta el símbolo actual para aplicar los parámetros óptimos del Oro o Plata. Manual: usa los parámetros de abajo.")
+gpProf       = "--- PERFIL DE CONFIGURACIÓN ---"
+assetProfile = input.string("Auto", "Perfil de Activo", options=["Auto", "Oro (XAUUSD)", "Plata (XAGUSD)", "Bitcoin (BTCUSD)", "Nasdaq (NAS100)", "Manual"], group=gpProf,
+                 tooltip="Auto: detecta el símbolo actual para aplicar los parámetros óptimos de Oro, Plata, Bitcoin o Nasdaq. Manual: usa los parámetros de abajo.")
 
 // ════════════════════════════════════════════════════════════════════
 // 2. INPUTS DE GESTIÓN DE RIESGO
 // ════════════════════════════════════════════════════════════════════
-gp_risk       = "--- GESTIÓN DE RIESGO ---"
-risk_perc     = input.float(1.0, "Riesgo por operación (%)", minval=0.1, maxval=10.0, group=gp_risk,
+gpRisk       = "--- GESTIÓN DE RIESGO ---"
+riskPerc     = input.float(1.0, "Riesgo por operación (%)", minval=0.1, maxval=10.0, group=gpRisk,
                  tooltip="Porcentaje de la equidad a arriesgar basado en la distancia del SL inicial")
-use_tp        = input.bool(true, "Usar Take Profit Fijo", group=gp_risk)
-rr_ratio_in   = input.float(3.0, "Relación Riesgo/Recompensa (R:R)", minval=0.5, step=0.1, group=gp_risk,
+useTP        = input.bool(true, "Usar Take Profit Fijo", group=gpRisk)
+rrRatioIn   = input.float(3.0, "Relación Riesgo/Recompensa (R:R)", minval=0.5, step=0.1, group=gpRisk,
                  tooltip="Oro sugerido: 3.0. Plata sugerido: 2.5.")
-use_be_in     = input.bool(true, "Mover a Break-Even (Precio Entrada)", group=gp_risk,
+useBEIn     = input.bool(true, "Mover a Break-Even (Precio Entrada)", group=gpRisk,
                  tooltip="ACTIVADO: protege el capital moviendo el SL a precio de entrada cuando el precio avanza a tu favor.")
-be_ratio_in   = input.float(1.0, "Multiplicador R:R para Break-Even", minval=0.3, step=0.1, group=gp_risk,
+beRatioIn   = input.float(1.0, "Multiplicador R:R para Break-Even", minval=0.3, step=0.1, group=gpRisk,
                  tooltip="1.0 = mueve a Break-Even al alcanzar beneficio 1:1 R:R (seguridad absoluta).")
+useTPChaseIn = input.bool(false, "Usar Persecución de TP (TP Chasing)", group=gpRisk,
+                 tooltip="ACTIVADO: el TP se aleja del precio si este se acerca a la distancia especificada.")
+ 
+chase = 3.0
+tpChasePtsIn = input.float(chase, "Distancia de Persecución TP (Pts)", minval=0.1, step=1.0, group=gpRisk,
+                 tooltip="Distancia en puntos/ticks desde el precio hasta el TP para activar la persecución.")
+tpChaseOffsetIn = input.float(chase, "Avance del TP (Pts)", minval=0.1, step=1.0, group=gpRisk,
+                 tooltip="Distancia en puntos/ticks que se colocará el TP por delante del precio actual.")
 
 // ════════════════════════════════════════════════════════════════════
 // 3. INPUTS MANUALES (Solo si Perfil = Manual)
 // ════════════════════════════════════════════════════════════════════
-gp_param        = "--- PARÁMETROS MANUALES (Si perfil = Manual) ---"
-ema_tf_input    = input.string("Auto", "Temporalidad de EMAs", options=["Auto", "15", "30", "60", "180", "240", "1440"], group=gp_param,
+gpParam        = "--- PARÁMETROS MANUALES (Si perfil = Manual) ---"
+emaTFInput    = input.string("Auto", "Temporalidad de EMAs", options=["Auto", "15", "30", "60", "180", "240", "1440"], group=gpParam,
                    tooltip="Auto: fuerza EMAs a 3h en intradía para filtrar ruido.")
-ema_fast_len_in = input.int(21,  "Período EMA Rápida manual", minval=1, group=gp_param)
-ema_slow_len_in = input.int(55,  "Período EMA Lenta manual", minval=1, group=gp_param)
-swing_period_in = input.int(8,   "Velas Swing High/Low manual", minval=2, group=gp_param)
-sl_buf_pts_in   = input.float(2.0, "Buffer SL manual (Ticks/Puntos)", minval=0.0, group=gp_param)
+emaFastLenIn = input.int(21,  "Período EMA Rápida manual", minval=1, group=gpParam)
+emaSlowLenIn = input.int(55,  "Período EMA Lenta manual", minval=1, group=gpParam)
+swingPeriodIn = input.int(8,   "Velas Swing High/Low manual", minval=2, group=gpParam)
+slBufPtsIn   = input.float(2.0, "Buffer SL manual (Ticks/Puntos)", minval=0.0, group=gpParam)
 
-use_imacd_in    = input.bool(false, "Usar iMACD manual", group=gp_param)
-imacd_len_in    = input.int(35,     "Período iMACD manual", minval=1, group=gp_param)
+useIMACDIn    = input.bool(false, "Usar iMACD manual", group=gpParam)
+imacdLenIn    = input.int(35,     "Período iMACD manual", minval=1, group=gpParam)
 
-use_ema_spr_in  = input.bool(true,  "Usar Abertura EMAs manual", group=gp_param)
-ema_spr_mult_in = input.float(0.4,  "Abertura Mínima EMAs manual (× ATR)", minval=0.0, step=0.1, group=gp_param)
+useEMASprIn  = input.bool(true,  "Usar Abertura EMAs manual", group=gpParam)
+emaSprMultIn = input.float(0.4,  "Abertura Mínima EMAs manual (× ATR)", minval=0.0, step=0.1, group=gpParam)
 
-use_ha_str_in   = input.bool(false, "Fuerza Heikin-Ashi manual", group=gp_param)
-use_ema200_in   = input.bool(false, "Filtro EMA 200 manual", group=gp_param)
-ema200_len_in   = input.int(200,    "Período EMA 200 manual", minval=1, group=gp_param)
+useHAStrIn   = input.bool(false, "Fuerza Heikin-Ashi manual", group=gpParam)
+useEMA200In   = input.bool(false, "Filtro EMA 200 manual", group=gpParam)
+ema200LenIn   = input.int(200,    "Período EMA 200 manual", minval=1, group=gpParam)
 
 // Filtros específicos adicionales manuales
-use_atr_min_in   = input.bool(false, "Filtro ATR Mínimo manual", group=gp_param)
-atr_filter_len_in = input.int(14,    "Período ATR manual", minval=1, group=gp_param)
-atr_min_usd_in   = input.float(2.0,  "ATR Mínimo USD manual", minval=0.1, step=0.1, group=gp_param)
-use_adx_in       = input.bool(false, "Filtro ADX manual", group=gp_param)
-adx_len_in       = input.int(14,     "Período ADX manual", minval=1, group=gp_param)
-adx_min_in       = input.float(22.0, "ADX Mínimo manual", minval=5.0, step=1.0, group=gp_param)
-use_rsi_in       = input.bool(false, "Filtro RSI manual", group=gp_param)
-rsi_len_in       = input.int(14,     "Período RSI manual", minval=1, group=gp_param)
-rsi_ob_in        = input.float(70.0, "RSI Sobrecompra manual", minval=50.0, group=gp_param)
-rsi_os_in        = input.float(30.0, "RSI Sobreventa manual", maxval=50.0, group=gp_param)
-use_htf_in       = input.bool(false, "Filtro HTF manual", group=gp_param)
-htf_ema_len_in   = input.int(50,     "Período EMA HTF manual", minval=1, group=gp_param)
+useATRMinIn   = input.bool(false, "Filtro ATR Mínimo manual", group=gpParam)
+atrFilterLenIn = input.int(14,    "Período ATR manual", minval=1, group=gpParam)
+atrMinUSDIn   = input.float(2.0,  "ATR Mínimo USD manual", minval=0.1, step=0.1, group=gpParam)
+useADXIn       = input.bool(false, "Filtro ADX manual", group=gpParam)
+adxLenIn       = input.int(14,     "Período ADX manual", minval=1, group=gpParam)
+adxMinIn       = input.float(22.0, "ADX Mínimo manual", minval=5.0, step=1.0, group=gpParam)
+useRSIIn       = input.bool(false, "Filtro RSI manual", group=gpParam)
+rsiLenIn       = input.int(14,     "Período RSI manual", minval=1, group=gpParam)
+rsiOBIn        = input.float(70.0, "RSI Sobrecompra manual", minval=50.0, group=gpParam)
+rsiOSIn        = input.float(30.0, "RSI Sobreventa manual", maxval=50.0, group=gpParam)
+useHTFIn       = input.bool(false, "Filtro HTF manual", group=gpParam)
+htfEMALenIn   = input.int(50,     "Período EMA HTF manual", minval=1, group=gpParam)
 
 // Filtro Horario General (Londres + Nueva York)
-gp_ses          = "--- CONTROL DE SESIÓN ---"
-use_session     = input.bool(false, "Usar Sesión Horaria", group=gp_ses,
+gpSes          = "--- CONTROL DE SESIÓN ---"
+useSessionIn   = input.bool(false, "Usar Sesión Horaria", group=gpSes,
                    tooltip="Desactivado por defecto. Activa si solo quieres operar en horas específicas.")
-session_str     = input.session("0800-1700", "Horario Operativo (UTC)", group=gp_ses)
+sessionStrIn   = input.session("0800-1700", "Horario Operativo (UTC)", group=gpSes)
 
 // ════════════════════════════════════════════════════════════════════
 // 4. AUTODETECCIÓN Y ASIGNACIÓN DE PARÁMETROS EFECTIVOS
 // ════════════════════════════════════════════════════════════════════
-ticker_lower = str.lower(syminfo.ticker)
-is_gold_symbol   = str.contains(ticker_lower, "xau") or str.contains(ticker_lower, "gold")
-is_silver_symbol = str.contains(ticker_lower, "xag") or str.contains(ticker_lower, "silver")
+tickerLower = str.lower(syminfo.ticker)
+isGoldSymbol    = str.contains(tickerLower, "xau") or str.contains(tickerLower, "gold")
+isSilverSymbol  = str.contains(tickerLower, "xag") or str.contains(tickerLower, "silver")
+isBitcoinSymbol = str.contains(tickerLower, "btc") or str.contains(tickerLower, "bitcoin")
+isNasdaqSymbol  = str.contains(tickerLower, "nas100") or str.contains(tickerLower, "nasdaq") or str.contains(tickerLower, "us100") or str.contains(tickerLower, "ustec") or str.contains(tickerLower, "nq") or str.contains(tickerLower, "tech")
 
-is_gold   = asset_profile == "Oro (XAUUSD)"   or (asset_profile == "Auto" and is_gold_symbol)
-is_silver = asset_profile == "Plata (XAGUSD)" or (asset_profile == "Auto" and is_silver_symbol)
+isGold    = assetProfile == "Oro (XAUUSD)"     or (assetProfile == "Auto" and isGoldSymbol)
+isSilver  = assetProfile == "Plata (XAGUSD)"   or (assetProfile == "Auto" and isSilverSymbol)
+isBitcoin = assetProfile == "Bitcoin (BTCUSD)" or (assetProfile == "Auto" and isBitcoinSymbol)
+isNasdaq  = assetProfile == "Nasdaq (NAS100)"  or (assetProfile == "Auto" and isNasdaqSymbol)
 
-// Asignación inteligente de variables basadas en el perfil cargado
-ema_tf          = is_gold ? "Auto" : is_silver ? "15" : ema_tf_input
-ema_fast_len    = is_gold ? 21     : is_silver ? 9     : ema_fast_len_in
-ema_slow_len    = is_gold ? 55     : is_silver ? 21    : ema_slow_len_in
-swing_period    = is_gold ? 8      : is_silver ? 5     : swing_period_in
-sl_buffer_pts   = is_gold ? 2.0    : is_silver ? 0.0   : sl_buf_pts_in
+// --- VARIABLEs DE LONGITUD / TIMEFRAME (Exigen tipo simple int / string, resueltas por ternarios) ---
+emaTF         = isGold ? timeframe.period : isSilver ? "15" : isBitcoin ? "15" : isNasdaq ? timeframe.period : emaTFInput
+emaFastLen    = isGold ? 8     : isSilver ? 9    : isBitcoin ? 9    : isNasdaq ? 9                : emaFastLenIn
+emaSlowLen    = isGold ? 22    : isSilver ? 21   : isBitcoin ? 21   : isNasdaq ? 21               : emaSlowLenIn
+swingPeriod   = isGold ? 8     : isSilver ? 5    : isBitcoin ? 5    : isNasdaq ? 5                : swingPeriodIn
+imacdLen      = isGold ? 35    : isSilver ? 35   : isBitcoin ? 35   : isNasdaq ? 35               : imacdLenIn
+ema200Len     = isGold ? 200   : isSilver ? 200  : isBitcoin ? 200  : isNasdaq ? 200              : ema200LenIn
+atrFilterLen  = isGold ? 14    : isSilver ? 14   : isBitcoin ? 14   : isNasdaq ? 14               : atrFilterLenIn
+adxLen        = isGold ? 14    : isSilver ? 14   : isBitcoin ? 14   : isNasdaq ? 14               : adxLenIn
+rsiLen        = isGold ? 14    : isSilver ? 14   : isBitcoin ? 14   : isNasdaq ? 14               : rsiLenIn
+htfEMALen     = isGold ? 50    : isSilver ? 50   : isBitcoin ? 50   : isNasdaq ? 50               : htfEMALenIn
 
-// Gestión de riesgo dinámica
-rr_ratio        = is_gold ? 3.0    : is_silver ? 2.5   : rr_ratio_in
-use_be          = is_gold ? false  : is_silver ? true  : use_be_in
-be_ratio        = is_gold ? 1.0    : is_silver ? 1.0   : be_ratio_in
+// --- VARIABLES DINÁMICAS (Se inicializan con los inputs y se modifican mediante bloques IF/ELSE) ---
+slBufferPts   = slBufPtsIn
+rrRatio        = rrRatioIn
+useBE          = useBEIn
+beRatio        = beRatioIn
+useIMACD       = useIMACDIn
+useEMASpread  = useEMASprIn
+emaSpreadMult = emaSprMultIn
+useHAStrength = useHAStrIn
+useEMA200      = useEMA200In
+useATRMin     = useATRMinIn
+atrMinUSD     = atrMinUSDIn
+useADX         = useADXIn
+adxMin         = adxMinIn
+useRSI         = useRSIIn
+rsiOB          = rsiOBIn
+rsiOS          = rsiOSIn
+useHTF         = useHTFIn
+useTPChase     = useTPChaseIn
+tpChasePts     = tpChasePtsIn
+tpChaseOffset  = tpChaseOffsetIn
+useSession     = useSessionIn
+sessionStr     = sessionStrIn
 
-// iMACD e Abertura
-use_imacd       = is_gold ? false  : is_silver ? true  : use_imacd_in
-imacd_len       = is_gold ? 35     : is_silver ? 35    : imacd_len_in
-use_ema_spread  = is_gold ? true   : is_silver ? false : use_ema_spr_in
-ema_spread_mult = is_gold ? 0.4    : is_silver ? 0.0   : ema_spr_mult_in
+if isGold
+    slBufferPts    := 0.3
+    rrRatio        := 3.3
+    useBE          := true,      beRatio        := 1.5   // Asegura BE a 1.5x de beneficio para proteger el capital
+    useIMACD       := true                               // Activado: Filtra rangos cuando md == 0.0
+    useEMASpread   := true,      emaSpreadMult  := 0.15  // Más estricto: evita falsas rupturas
+    useHAStrength  := false
+    useEMA200      := true
+    useATRMin      := true,      atrMinUSD      := 3.5
+    useADX         := true,      adxMin         := 22.0  // Exige tendencia más fuerte
+    useRSI         := false,     rsiOB          := 70.0,    rsiOS        := 30.0
+    useHTF         := false
+    useTPChase     := true,      tpChasePts     := 12.0,    tpChaseOffset := 12.0
+    useSession     := true,      sessionStr     := "0700-1700"
+else if isSilver
+    slBufferPts   := 0.0
+    rrRatio        := 2.5
+    useBE          := true,     beRatio        := 1.0
+    useIMACD       := true
+    useEMASpread  := false,    emaSpreadMult := 0.0
+    useHAStrength := true
+    useEMA200      := true
+    useATRMin     := false,    atrMinUSD     := 2.0
+    useADX         := false,    adxMin        := 22.0
+    useRSI         := false,    rsiOB         := 70.0,    rsiOS        := 30.0
+    useHTF         := false
+    useTPChase     := true,     tpChasePts     := 2.0,    tpChaseOffset := 2.0
+    useSession     := false
+else if isBitcoin
+    slBufferPts   := 0.0
+    rrRatio        := 1.8
+    useBE          := true,     beRatio        := 1.0
+    useIMACD       := true
+    useEMASpread  := true,     emaSpreadMult := 0.3
+    useHAStrength := true
+    useEMA200      := true
+    useATRMin     := false,    atrMinUSD     := 2.0
+    useADX         := false,    adxMin        := 22.0
+    useRSI         := true,     rsiOB         := 70.0,    rsiOS        := 0.0
+    useHTF         := false
+    useTPChase     := true,     tpChasePts     := 150.0,   tpChaseOffset := 150.0
+    useSession     := false
+else if isNasdaq
+    slBufferPts   := 0.0
+    rrRatio        := 1.5
+    useBE          := true,     beRatio        := 1.0
+    useIMACD       := false
+    useEMASpread  := false,    emaSpreadMult := 0.0
+    useHAStrength := false
+    useEMA200      := false
+    useATRMin     := false,    atrMinUSD     := 2.0
+    useADX         := false,    adxMin        := 22.0
+    useRSI         := false,    rsiOB         := 75.0,    rsiOS        := 25.0
+    useHTF         := false
+    useTPChase     := true,     tpChasePts     := 15.0,    tpChaseOffset := 15.0
+    useSession     := false
 
-// Filtros optimizados base
-use_ha_strength = is_gold ? false  : is_silver ? true  : use_ha_str_in
-use_ema200      = is_gold ? false  : is_silver ? true  : use_ema200_in
-ema200_len      = is_gold ? 200    : is_silver ? 200   : ema200_len_in
-
-// Filtros específicos adicionales de Oro
-use_atr_min     = is_gold ? false  : is_silver ? false : use_atr_min_in
-atr_filter_len  = is_gold ? 14     : is_silver ? 14    : atr_filter_len_in
-atr_min_usd     = is_gold ? 2.0    : is_silver ? 2.0   : atr_min_usd_in
-use_adx         = is_gold ? false  : is_silver ? false : use_adx_in
-adx_len         = is_gold ? 14     : is_silver ? 14    : adx_len_in
-adx_min         = is_gold ? 22.0   : is_silver ? 22.0  : adx_min_in
-use_rsi         = is_gold ? false  : is_silver ? false : use_rsi_in
-rsi_len         = is_gold ? 14     : is_silver ? 14    : rsi_len_in
-rsi_ob          = is_gold ? 70.0   : is_silver ? 70.0  : rsi_ob_in
-rsi_os          = is_gold ? 30.0   : is_silver ? 30.0  : rsi_os_in
-use_htf         = is_gold ? false  : is_silver ? false : use_htf_in
-htf_ema_len     = is_gold ? 50     : is_silver ? 50    : htf_ema_len_in
+// --- VALIDACIÓN DE TEMPORALIDAD CORRECTA EN TRADINGVIEW ---
+correctTF = isGold ? "15" : isSilver ? "30" : isBitcoin ? "30" : isNasdaq ? "5" : ""
+if correctTF != "" and timeframe.period != correctTF
+    runtime.error("Temporalidad incorrecta para " + (isGold ? "Oro (XAUUSD)" : isSilver ? "Plata (XAGUSD)" : isBitcoin ? "Bitcoin (BTCUSD)" : "Nasdaq (NAS100)") + ". Por favor, cambie el timeframe del gráfico a " + (isGold ? "15 minutos (15m)" : isSilver or isBitcoin ? "30 minutos (30m)" : "5 minutos (5m)") + " para el correcto funcionamiento de la estrategia.")
 
 // ════════════════════════════════════════════════════════════════════
 // 5. CÁLCULO DE VELAS HEIKIN-ASHI RECURSIVAS NATIVAS
@@ -128,269 +201,286 @@ haOpen := na(haOpen[1]) ? (open + close) / 2 : (haOpen[1] + haClose[1]) / 2
 haHigh = math.max(high, math.max(haOpen, haClose))
 haLow  = math.min(low,  math.min(haOpen, haClose))
 
-ha_green = haClose > haOpen
-ha_red   = haClose < haOpen
+haGreen = haClose > haOpen
+haRed   = haClose < haOpen
 
 // Pintar velas HA semi-transparentes de fondo
 plotcandle(haOpen, haHigh, haLow, haClose, title="Velas Heikin-Ashi",
-           color=ha_green ? color.new(color.green, 85) : color.new(color.red, 85),
-           wickcolor=ha_green ? color.new(color.green, 80) : color.new(color.red, 80),
+           color=haGreen ? color.new(color.green, 85) : color.new(color.red, 85),
+           wickcolor=haGreen ? color.new(color.green, 80) : color.new(color.red, 80),
            bordercolor=na)
 
 // ════════════════════════════════════════════════════════════════════
 // 6. RESOLUCIÓN DE TEMPORALIDADES MTF Y MEDIAS MÓVILES
 // ════════════════════════════════════════════════════════════════════
-string resolved_tf = ema_tf
-if ema_tf == "Auto"
+string resolvedTF = emaTF
+if emaTF == "Auto"
     if timeframe.isminutes
         if timeframe.multiplier <= 180
-            resolved_tf := "180" // Forzado a 3h para cualquier gráfico intradía en el Oro
+            resolvedTF := "180" // Forzado a 3h para cualquier gráfico intradía en el Oro
         else
-            resolved_tf := "1440"
+            resolvedTF := "1440"
     else if timeframe.isdaily
-        resolved_tf := "W"
+        resolvedTF := "W"
     else
-        resolved_tf := "M"
+        resolvedTF := "M"
 
 // Cálculo de EMAs mediante request.security en la temporalidad resuelta
-ema_fast_base = ta.ema(close, ema_fast_len)
-ema_slow_base = ta.ema(close, ema_slow_len)
-ema_200_base  = ta.ema(close, ema200_len)
+emaFastBase = ta.ema(close, emaFastLen)
+emaSlowBase = ta.ema(close, emaSlowLen)
+ema200Base  = ta.ema(close, ema200Len)
 
-ema_fast = request.security(syminfo.tickerid, resolved_tf, ema_fast_base, lookahead=barmerge.lookahead_off)
-ema_slow = request.security(syminfo.tickerid, resolved_tf, ema_slow_base, lookahead=barmerge.lookahead_off)
-ema_200  = request.security(syminfo.tickerid, resolved_tf, ema_200_base, lookahead=barmerge.lookahead_off)
+emaFast = request.security(syminfo.tickerid, resolvedTF, emaFastBase, lookahead=barmerge.lookahead_off)
+emaSlow = request.security(syminfo.tickerid, resolvedTF, emaSlowBase, lookahead=barmerge.lookahead_off)
+ema200  = request.security(syminfo.tickerid, resolvedTF, ema200Base, lookahead=barmerge.lookahead_off)
 
-plot(ema_fast, "EMA Rápida", color=color.new(color.lime, 10), linewidth=2)
-plot(ema_slow, "EMA Lenta",  color=color.new(color.red,  10), linewidth=2)
-plot(use_ema200 ? ema_200 : na, "EMA 200", color=color.new(color.blue, 30), linewidth=1, linestyle=plot.linestyle_dashed)
+plot(emaFast, "EMA Rápida", color=color.new(color.lime, 10), linewidth=2)
+plot(emaSlow, "EMA Lenta",  color=color.new(color.red,  10), linewidth=2)
+plot(useEMA200 ? ema200 : na, "EMA 200", color=color.new(color.blue, 30), linewidth=1, linestyle=plot.linestyle_dashed)
 
 // ════════════════════════════════════════════════════════════════════
 // 7. CÁLCULO DE INDICADORES DE FILTRO
 // ════════════════════════════════════════════════════════════════════
 
 // --- FILTRO DE CONTROL HORARIO ---
-in_session = not use_session or not na(time(timeframe.period, session_str, "UTC"))
+inSession = not useSession or not na(time(timeframe.period, sessionStr, "UTC"))
 
 // --- FILTRO DE ABERTURA DE EMAs ---
-distancia_emas = math.abs(ema_fast - ema_slow)
-abertura_ok    = not use_ema_spread or (distancia_emas >= (ta.atr(14) * ema_spread_mult))
+distanciaEMAs = math.abs(emaFast - emaSlow)
+aberturaOK    = not useEMASpread or (distanciaEMAs >= (ta.atr(14) * emaSpreadMult))
 
 // --- FILTRO IMPULSE MACD ---
-calc_zlema(src, length) =>
+calcZLEMA(src, length) =>
     ema1 = ta.ema(src, length)
     ema2 = ta.ema(ema1, length)
     d = ema1 - ema2
     ema1 + d
 
-imacd_src = hlc3
-hi = ta.rma(high, imacd_len)
-lo = ta.rma(low, imacd_len)
-mi = calc_zlema(imacd_src, imacd_len)
+imacdSrc = hlc3
+hi = ta.rma(high, imacdLen)
+lo = ta.rma(low, imacdLen)
+mi = calcZLEMA(imacdSrc, imacdLen)
 md = mi > hi ? mi - hi : mi < lo ? mi - lo : 0.0
 
-imacd_long_ok  = not use_imacd or (md > 0.0)
-imacd_short_ok = not use_imacd or (md < 0.0)
+imacdLongOK  = not useIMACD or (md >= 0.0)   // md==0.0 en zona neutra al salir del rango: permitido
+imacdShortOK = not useIMACD or (md <= 0.0)   // md==0.0 en zona neutra al salir del rango: permitido
 
 // --- FILTROS DE OPTIMIZACIÓN SECUNDARIOS ---
-ema200_long_ok  = not use_ema200 or (close > ema_200)
-ema200_short_ok = not use_ema200 or (close < ema_200)
+ema200LongOK  = not useEMA200 or (close > ema200)
+ema200ShortOK = not useEMA200 or (close < ema200)
 
-ha_strength_long  = not use_ha_strength or (haLow  == haOpen)
-ha_strength_short = not use_ha_strength or (haHigh == haOpen)
+haStrengthLong  = not useHAStrength or (haLow  == haOpen)
+haStrengthShort = not useHAStrength or (haHigh == haOpen)
+
+// Exigir que el giro de color Heikin-Ashi sea reciente (máximo 6 velas)
+haColorChangeLong  = ta.barssince(haClose[1] < haOpen[1] and haClose > haOpen) <= 6
+haColorChangeShort = ta.barssince(haClose[1] > haOpen[1] and haClose < haOpen) <= 6
 
 // Filtros específicos de Oro adicionales
-atr_val  = ta.atr(atr_filter_len)
-atr_ok   = not use_atr_min or (atr_val >= atr_min_usd)
+atrVal  = ta.atr(atrFilterLen)
+atrOK   = not useATRMin or (atrVal >= atrMinUSD)
 
-[adx_val, di_plus, di_minus] = ta.dmi(adx_len, adx_len)
-adx_ok = not use_adx or (adx_val >= adx_min)
+[adxVal, diPlus, diMinus] = ta.dmi(adxLen, adxLen)
+adxOK = not useADX or (adxVal >= adxMin)
 
-rsi_val      = ta.rsi(close, rsi_len)
-rsi_long_ok  = not use_rsi or (rsi_val < rsi_ob)
-rsi_short_ok = not use_rsi or (rsi_val > rsi_os)
+rsiVal      = ta.rsi(close, rsiLen)
+rsiLongOK  = not useRSI or (rsiVal < rsiOB)
+rsiShortOK = not useRSI or (rsiVal > rsiOS)
 
-htf_ema      = request.security(syminfo.tickerid, "60", ta.ema(close, htf_ema_len), lookahead=barmerge.lookahead_off)
-htf_long_ok  = not use_htf or (close > htf_ema)
-htf_short_ok = not use_htf or (close < htf_ema)
+htfEMA      = request.security(syminfo.tickerid, "60", ta.ema(close, htfEMALen), lookahead=barmerge.lookahead_off)
+htfLongOK  = not useHTF or (close > htfEMA)
+htfShortOK = not useHTF or (close < htfEMA)
 
 // ════════════════════════════════════════════════════════════════════
 // 8. CONDICIONES DE ALINEACIÓN Y GATILLOS
 // ════════════════════════════════════════════════════════════════════
-is_long_aligned  = (ema_fast > ema_slow) and ha_green and
-                   imacd_long_ok  and ema200_long_ok  and ha_strength_long  and
-                   in_session     and abertura_ok     and atr_ok            and
-                   adx_ok         and rsi_long_ok      and htf_long_ok
+isLongAligned  = (emaFast > emaSlow) and haGreen and
+                   imacdLongOK  and ema200LongOK  and haStrengthLong  and
+                   haColorChangeLong and
+                   inSession     and aberturaOK     and atrOK            and
+                   adxOK         and rsiLongOK      and htfLongOK
 
-is_short_aligned = (ema_fast < ema_slow) and ha_red and
-                   imacd_short_ok and ema200_short_ok and ha_strength_short and
-                   in_session     and abertura_ok     and atr_ok            and
-                   adx_ok         and rsi_short_ok     and htf_short_ok
+isShortAligned = (emaFast < emaSlow) and haRed and
+                   imacdShortOK and ema200ShortOK and haStrengthShort and
+                   haColorChangeShort and
+                   inSession     and aberturaOK     and atrOK            and
+                   adxOK         and rsiShortOK     and htfShortOK
 
 // Confirmación de velas consecutivas
-confirm_bars = 2
-var int long_count  = 0
-var int short_count = 0
-long_count  := is_long_aligned  ? long_count[1]  + 1 : 0
-short_count := is_short_aligned ? short_count[1] + 1 : 0
+confirmBars = 1
+var int longCount  = 0
+var int shortCount = 0
+longCount  := isLongAligned  ? longCount[1]  + 1 : 0
+shortCount := isShortAligned ? shortCount[1] + 1 : 0
 
-trigger_long  = long_count  >= confirm_bars and long_count[1]  < confirm_bars
-trigger_short = short_count >= confirm_bars and short_count[1] < confirm_bars
+triggerLong  = longCount  >= confirmBars and longCount[1]  < confirmBars
+triggerShort = shortCount >= confirmBars and shortCount[1] < confirmBars
 
 // ════════════════════════════════════════════════════════════════════
 // 9. GESTIÓN DEL RIESGO Y DETERMINACIÓN DEL NIVELES DE SL/TP
 // ════════════════════════════════════════════════════════════════════
-lowest_low   = ta.lowest(low, swing_period)
-highest_high = ta.highest(high, swing_period)
-sl_buffer    = sl_buffer_pts * syminfo.mintick
+lowestLow   = ta.lowest(low, swingPeriod)
+highestHigh = ta.highest(high, swingPeriod)
+slBuffer    = slBufferPts * syminfo.mintick
 
-var float pending_sl = na
-var float pending_tp = na
+var float pendingSL = na
+var float pendingTP = na
 
-if trigger_long
-    pending_sl := lowest_low - sl_buffer
-    if (close - pending_sl) <= 0
-        pending_sl := close - syminfo.mintick
-    risk = close - pending_sl
-    pending_tp := use_tp ? (close + risk * rr_ratio) : na
+if triggerLong
+    pendingSL := lowestLow - slBuffer
+    if (close - pendingSL) <= 0
+        pendingSL := close - syminfo.mintick
+    risk = close - pendingSL
+    pendingTP := useTP ? (close + risk * rrRatio) : na
 
-if trigger_short
-    pending_sl := highest_high + sl_buffer
-    if (pending_sl - close) <= 0
-        pending_sl := close + syminfo.mintick
-    risk = pending_sl - close
-    pending_tp := use_tp ? (close - risk * rr_ratio) : na
+if triggerShort
+    pendingSL := highestHigh + slBuffer
+    if (pendingSL - close) <= 0
+        pendingSL := close + syminfo.mintick
+    risk = pendingSL - close
+    pendingTP := useTP ? (close - risk * rrRatio) : na
 
 // ════════════════════════════════════════════════════════════════════
 // 10. VARIABLES PERSISTENTES Y EJECUCIÓN DE ENTRADAS
 // ════════════════════════════════════════════════════════════════════
-var float active_sl    = na
-var float active_tp    = na
-var float trail_step   = na
-var float entry_p      = na
-var bool  be_triggered = false
+var float activeSL    = na
+var float activeTP    = na
+var float trailStep   = na
+var float entryP      = na
+var bool  beTriggered = false
 
 // Cálculo de lotaje en base a riesgo inicial
-risk_amount = strategy.equity * (risk_perc / 100.0)
-risk_dist   = math.abs(close - pending_sl)
-qty         = risk_amount / (risk_dist * syminfo.pointvalue)
+riskAmount = strategy.equity * (riskPerc / 100.0)
+riskDist   = math.abs(close - pendingSL)
+qty         = riskAmount / (riskDist * syminfo.pointvalue)
 
-if trigger_long and strategy.position_size == 0
+if triggerLong and strategy.position_size == 0
     strategy.entry("Long", strategy.long, qty=qty)
 
-if trigger_short and strategy.position_size == 0
+if triggerShort and strategy.position_size == 0
     strategy.entry("Short", strategy.short, qty=qty)
 
 // Apertura del trade detectada
-pos_opened = ta.change(strategy.position_size) != 0 and strategy.position_size != 0
+posOpened = ta.change(strategy.position_size) != 0 and strategy.position_size != 0
 
-if pos_opened
-    entry_p      := strategy.position_avg_price
-    active_sl    := pending_sl
-    active_tp    := pending_tp
-    trail_step   := math.abs(entry_p - active_sl) / 3.0
-    be_triggered := false
+if posOpened
+    entryP      := strategy.position_avg_price
+    activeSL    := pendingSL
+    activeTP    := pendingTP
+    trailStep   := math.abs(entryP - activeSL) / 5.0
+    beTriggered := false
 
 // ════════════════════════════════════════════════════════════════════
 // 11. MOTOR DE GESTIÓN DINÁMICA: BREAK-EVEN Y TRAILING STOP
 // ════════════════════════════════════════════════════════════════════
 
-// --- ACTIVACIÓN DEL BREAK-EVEN ---
-if strategy.position_size != 0 and use_be and not be_triggered
-    distancia_inicial = math.abs(entry_p - pending_sl)
+// --- PERSECUCIÓN DE TAKE PROFIT (TP CHASING) ---
+// tpChasePts y tpChaseOffset son en puntos reales de precio (ej: 20 = $20 en Oro)
+if strategy.position_size != 0 and useTPChase and not na(activeTP)
     if strategy.position_size > 0
-        recorrido = high - entry_p
-        if recorrido >= (distancia_inicial * be_ratio)
-            active_sl := entry_p
-            be_triggered := true
+        if (activeTP - high) <= tpChasePts
+            activeTP := high + tpChaseOffset
     else if strategy.position_size < 0
-        recorrido = entry_p - low
-        if recorrido >= (distancia_inicial * be_ratio)
-            active_sl := entry_p
-            be_triggered := true
+        if (low - activeTP) <= tpChasePts
+            activeTP := low - tpChaseOffset
+
+// --- ACTIVACIÓN DEL BREAK-EVEN ---
+if strategy.position_size != 0 and useBE and not beTriggered
+    distanciaInicial = math.abs(entryP - pendingSL)
+    if strategy.position_size > 0
+        recorrido = high - entryP
+        if recorrido >= (distanciaInicial * beRatio)
+            activeSL := entryP
+            beTriggered := true
+    else if strategy.position_size < 0
+        recorrido = entryP - low
+        if recorrido >= (distanciaInicial * beRatio)
+            activeSL := entryP
+            beTriggered := true
 
 // --- GESTIÓN DEL TRAILING STOP POR TERCIOS ---
 if strategy.position_size > 0
-    recorrido = high - entry_p
-    niveles = math.floor(recorrido / trail_step)
+    recorrido = high - entryP
+    niveles = math.floor(recorrido / trailStep)
     if niveles > 0
-        initial_sl = entry_p - (trail_step * 3.0)
-        nuevo_sl = initial_sl + (trail_step * niveles)
-        if nuevo_sl > active_sl
-            active_sl := nuevo_sl
+        initialSL = entryP - (trailStep * 5.0)
+        nuevoSL = initialSL + (trailStep * niveles)
+        if nuevoSL > activeSL
+            activeSL := nuevoSL
 
 else if strategy.position_size < 0
-    recorrido = entry_p - low
-    niveles = math.floor(recorrido / trail_step)
+    recorrido = entryP - low
+    niveles = math.floor(recorrido / trailStep)
     if niveles > 0
-        initial_sl = entry_p + (trail_step * 3.0)
-        nuevo_sl = initial_sl - (trail_step * niveles)
-        if nuevo_sl < active_sl or na(active_sl)
-            active_sl := nuevo_sl
+        initialSL = entryP + (trailStep * 5.0)
+        nuevoSL = initialSL - (trailStep * niveles)
+        if nuevoSL < activeSL or na(activeSL)
+            activeSL := nuevoSL
 
 // Reseteo al cerrar posición
 if strategy.position_size == 0
-    active_sl    := na
-    active_tp    := na
-    trail_step   := na
-    entry_p      := na
-    be_triggered := false
+    activeSL    := na
+    activeTP    := na
+    trailStep   := na
+    entryP      := na
+    beTriggered := false
 
-// Ejecución de salidas
-if strategy.position_size != 0
-    strategy.exit("Exit", stop=active_sl, limit=active_tp)
+// Ejecución de salidas — se llama cada barra para que el TP chase actualice el limit dinámicamente
+if strategy.position_size > 0
+    strategy.exit("Exit", from_entry="Long",  stop=activeSL, limit=activeTP)
+else if strategy.position_size < 0
+    strategy.exit("Exit", from_entry="Short", stop=activeSL, limit=activeTP)
 
 // ════════════════════════════════════════════════════════════════════
 // 12. PLOTS DE NIVELES Y TABLA DE CONTROL
 // ════════════════════════════════════════════════════════════════════
-plot(strategy.position_size != 0 ? active_sl : na, "Stop Loss",   color=color.red,   style=plot.style_linebr, linewidth=2)
-plot(strategy.position_size != 0 and use_tp ? active_tp : na, "Take Profit", color=color.green, style=plot.style_linebr, linewidth=2)
+plot(strategy.position_size != 0 ? activeSL : na, "Stop Loss",   color=color.red,   style=plot.style_linebr, linewidth=2)
+plot(strategy.position_size != 0 and useTP ? activeTP : na, "Take Profit", color=color.green, style=plot.style_linebr, linewidth=2)
 
 // Tabla de estadísticas
-var table main_table = table.new(position.top_right, 2, 10,
+var table mainTable = table.new(position.top_right, 2, 10,
      bgcolor=color.new(color.black, 15), border_width=1, border_color=color.gray)
 
 if barstate.islast
-    in_trade    = strategy.position_size != 0
-    table_atr   = ta.atr(14)
-    atr_display = str.tostring(table_atr, "#.##") + " USD"
+    inTrade    = strategy.position_size != 0
+    atrDisplay = str.tostring(atrVal, "#.##") + " USD"
     
-    profile_name = is_gold ? "ORO (Auto)" : is_silver ? "PLATA (Auto)" : "MANUAL"
-    tf_sugerido  = is_gold ? "1h" : is_silver ? "30min" : "-"
-    display_tf   = resolved_tf == "180" ? "3h" : resolved_tf == "240" ? "4h" : resolved_tf == "60" ? "1h" : resolved_tf == "30" ? "30m" : resolved_tf == "1440" ? "1d" : resolved_tf
-    imacd_status = not use_imacd ? "DESACTIVADO" : md == 0.0 ? "RANGO" : md > 0.0 ? "ALCISTA" : "BAJISTA"
-    imacd_color  = not use_imacd ? color.gray   : md == 0.0 ? color.orange : md > 0.0 ? color.green : color.red
+    profileName = isGold ? "ORO (Auto)" : isSilver ? "PLATA (Auto)" : isBitcoin ? "BTC (Auto)" : isNasdaq ? "NASDAQ (Auto)" : "MANUAL"
+    tfSugerido  = isGold ? "15min" : isSilver ? "30min" : isBitcoin ? "30min" : isNasdaq ? "5min" : "-"
+    displayTF   = resolvedTF == "180" ? "3h" : resolvedTF == "240" ? "4h" : resolvedTF == "60" ? "1h" : resolvedTF == "30" ? "30m" : resolvedTF == "1440" ? "1d" : resolvedTF
+    imacdStatus = not useIMACD ? "DESACTIVADO" : md == 0.0 ? "RANGO" : md > 0.0 ? "ALCISTA" : "BAJISTA"
+    imacdColor  = not useIMACD ? color.gray   : md == 0.0 ? color.orange : md > 0.0 ? color.green : color.red
 
-    table.cell(main_table, 0, 0, "Estrategia:",  text_color=color.white,  text_size=size.small)
-    table.cell(main_table, 1, 0, "HA_EMA MULTI",  text_color=color.yellow, text_size=size.small)
+    table.cell(mainTable, 0, 0, "Estrategia:",  text_color=color.white,  text_size=size.small)
+    table.cell(mainTable, 1, 0, "HA_EMA MULTI",  text_color=color.yellow, text_size=size.small)
 
-    table.cell(main_table, 0, 1, "Perfil:",      text_color=color.white,  text_size=size.small)
-    table.cell(main_table, 1, 1, profile_name,   text_color=color.yellow, text_size=size.small)
+    table.cell(mainTable, 0, 1, "Perfil:",      text_color=color.white,  text_size=size.small)
+    table.cell(mainTable, 1, 1, profileName,   text_color=color.yellow, text_size=size.small)
 
-    table.cell(main_table, 0, 2, "TF Sugerido:",  text_color=color.white,  text_size=size.small)
-    table.cell(main_table, 1, 2, tf_sugerido,     text_color=color.yellow, text_size=size.small)
+    table.cell(mainTable, 0, 2, "TF Sugerido:",  text_color=color.white,  text_size=size.small)
+    table.cell(mainTable, 1, 2, tfSugerido,     text_color=color.yellow, text_size=size.small)
 
-    table.cell(main_table, 0, 3, "Estado:",       text_color=color.white, text_size=size.small)
-    table.cell(main_table, 1, 3, in_trade ? "DENTRO" : "BUSCANDO",
-               text_color=in_trade ? color.green : color.yellow, text_size=size.small)
+    table.cell(mainTable, 0, 3, "Estado:",       text_color=color.white, text_size=size.small)
+    table.cell(mainTable, 1, 3, inTrade ? "DENTRO" : "BUSCANDO",
+               text_color=inTrade ? color.green : color.yellow, text_size=size.small)
 
-    table.cell(main_table, 0, 4, "Sesión:",       text_color=color.white, text_size=size.small)
-    table.cell(main_table, 1, 4, in_session ? "ACTIVA" : "CERRADA",
-               text_color=in_session ? color.green : color.gray, text_size=size.small)
+    table.cell(mainTable, 0, 4, "Sesión:",       text_color=color.white, text_size=size.small)
+    table.cell(mainTable, 1, 4, inSession ? "ACTIVA" : "CERRADA",
+               text_color=inSession ? color.green : color.gray, text_size=size.small)
 
-    table.cell(main_table, 0, 5, "ATR (" + timeframe.period + "):", text_color=color.white, text_size=size.small)
-    table.cell(main_table, 1, 5, atr_display,     text_color=color.green, text_size=size.small)
+    table.cell(mainTable, 0, 5, "ATR (" + timeframe.period + "):", text_color=color.white, text_size=size.small)
+    table.cell(mainTable, 1, 5, atrDisplay,     text_color=color.green, text_size=size.small)
 
-    table.cell(main_table, 0, 6, "TF EMAs:",       text_color=color.white, text_size=size.small)
-    table.cell(main_table, 1, 6, display_tf,       text_color=color.yellow, text_size=size.small)
+    table.cell(mainTable, 0, 6, "TF EMAs:",       text_color=color.white, text_size=size.small)
+    table.cell(mainTable, 1, 6, displayTF,       text_color=color.yellow, text_size=size.small)
 
-    table.cell(main_table, 0, 7, "iMACD:",        text_color=color.white, text_size=size.small)
-    table.cell(main_table, 1, 7, imacd_status,    text_color=imacd_color, text_size=size.small)
+    table.cell(mainTable, 0, 7, "iMACD:",        text_color=color.white, text_size=size.small)
+    table.cell(mainTable, 1, 7, imacdStatus,    text_color=imacdColor, text_size=size.small)
 
-    table.cell(main_table, 0, 8, "Equidad:",      text_color=color.white, text_size=size.small)
-    table.cell(main_table, 1, 8, "$" + str.tostring(strategy.equity, "#.##"),
+    table.cell(mainTable, 0, 8, "Equidad:",      text_color=color.white, text_size=size.small)
+    table.cell(mainTable, 1, 8, "$" + str.tostring(strategy.equity, "#.##"),
                text_color=color.green, text_size=size.small)
 
-    table.cell(main_table, 0, 9, "Rendimiento:",  text_color=color.white, text_size=size.small)
-    table.cell(main_table, 1, 9, str.tostring(strategy.netprofit, "#.##") + " USD",
+    table.cell(mainTable, 0, 9, "Rendimiento:",  text_color=color.white, text_size=size.small)
+    table.cell(mainTable, 1, 9, str.tostring(strategy.netprofit, "#.##") + " USD",
                text_color=strategy.netprofit >= 0 ? color.green : color.red, text_size=size.small)
