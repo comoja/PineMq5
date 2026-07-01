@@ -158,17 +158,17 @@ if isGold
     useFixedLot    := false,     fixedLotValue  := 0.01,    maxRiskPerc   := 5.0,     minStopsLevel := 0.0
 else if isSilver
     slBufferPts   := 0.0
-    rrRatio        := 2.5
-    useBE          := true,     beRatio        := 1.0
+    rrRatio        := 0.0
+    useBE          := false,     beRatio        := 1.0
     useIMACD       := true
     useEMASpread  := false,    emaSpreadMult := 0.0
     useHAStrength := true
     useEMA200      := true
-    useATRMin     := false,    atrMinUSD     := 2.0
+    useATRMin     := false,    atrMinUSD     := 1.0
     useADX         := false,    adxMin        := 22.0
     useRSI         := false,    rsiOB         := 70.0,    rsiOS        := 30.0
     useHTF         := false
-    useTPChase     := true,     tpChasePts     := 2.0,    tpChaseOffset := 2.0
+    useTPChase     := true,     tpChasePts     := 0.55,    tpChaseOffset := 0.55
     useSession     := false
     useFixedLot    := false,    fixedLotValue  := 0.01,    maxRiskPerc   := 5.0,     minStopsLevel := 0.0
 else if isBitcoin

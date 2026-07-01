@@ -1,460 +1,503 @@
 //+------------------------------------------------------------------+
-//|                                           BreakoutNY.mq5         |
-//|         Derivado del MASTER: BreakoutNY5min.pine                |
+//|                                             BreakoutNY15min.mq5  |
+//|                                  Copyright 2026, Antigravity AI  |
+//|                                             https://google.com   |
 //+------------------------------------------------------------------+
-// ╔══════════════════════════════════════════════════════════════════╗
-// ║  FUNCIONES CRÍTICAS — deben mantenerse sincronizadas con .pine  ║
-// ╠══════════════════════════════════════════════════════════════════╣
-// ║  [MQ5-CRITICAL #1]  GetOwnPositionType() → -1 / BUY / SELL     ║
-// ║  [MQ5-CRITICAL #2]  try_long bloquea si pos_type==SELL          ║
-// ║                     try_short bloquea si pos_type==BUY          ║
-// ║  [MQ5-CRITICAL #3]  Trailing por quintos: trail_step=dist/5     ║
-// ║  [MQ5-CRITICAL #4]  Filtro magic_number en GetOwnPositionType() ║
-// ╚══════════════════════════════════════════════════════════════════╝
-#property copyright "AI Translator"
-#property version   "6.70"
+#property copyright "Copyright 2026, Antigravity AI"
+#property link      "https://google.com"
+#property version   "1.00"
 
 #include <Trade\Trade.mqh>
 CTrade trade;
 
-// --- INPUTS ---
-input group "--- CONFIGURACIÓN GENERAL ---"
-input bool   panic_close   = false;       // 🚨 BOTÓN DE PÁNICO
-input double risk_usd      = 5.0;         // Dólares a arriesgar por trade
-input double rr            = 0.90;        // Relación RR para el BE / Target inicial
-input int    max_trades    = 3;           // Máx trades por día
-input int    ema_period    = 200;         // Período EMA 200
-input int    magic_number  = 83095;       // Magic number único de esta estrategia
+// ============================================================================
+// PARÁMETROS DE ENTRADA (INPUTS)
+// ============================================================================
+input group "--- GESTIÓN DE RIESGO ---"
+input double InpRR              = 0.90;      // Ratio Riesgo Beneficio (TP)
+input int    InpMaxTrades       = 3;         // Máx trades por día
+input double InpRiskPerc        = 2.0;       // Riesgo por operación (%)
+input double InpTpAdvPts        = 10.0;      // Puntos de avance TP (BE/Trailing)
+input ulong  MagicNumber        = 123456;    // Magic Number de la Estrategia
 
-input group "--- NOTIFICACIONES DE TELEGRAM ---"
-input bool   InpUseTelegram = false;       // Enviar alertas a Telegram
-input string InpBotToken    = "";          // Token del Bot de Telegram
-input string InpChatID      = "";          // Chat ID del Usuario/Canal
+input group "--- FILTROS DE ENTRADA ---"
+input int    InpEma200Length    = 50;        // Período EMA Tendencia
+input bool   InpUseImacd        = false;     // Usar Filtro Impulse MACD
+input int    InpImacdLen        = 34;        // Período Impulse MACD
 
-input group "--- FILTROS DE ENTRADA / RANGO ---"
-input bool   use_imacd     = false;       // Usar Filtro Impulse MACD
-input int    imacd_len     = 34;          // Período Impulse MACD
+input group "--- HORARIO DEL RANGO ---"
+input int    BrokerGmtOffset    = 3;         // GMT Offset del Servidor del Broker (ej. +3)
+input bool   IsDST              = true;      // ¿El Broker está en horario de verano? (DST)
+input int    TimezoneMode       = 0;         // Zona Horaria (0 = America/New_York, 1 = America/Mexico_City)
 
-input group "--- HORARIO DE RANGO (CONVERTIDO A HORA DEL BROKER) ---"
-input int    start_hour    = 16;          // Hora inicio Broker (9:30 NY es 16:30 en Brokers UTC+2/+3)
-input int    start_minute  = 30;          // Minuto inicio Broker
-input int    end_hour      = 16;          // Hora fin Broker (9:45 NY es 16:45 en Brokers UTC+2/+3)
-input int    end_minute    = 45;          // Minuto fin Broker
+// ============================================================================
+// VARIABLES GLOBALES
+// ============================================================================
+// Variables efectivas (reasignables por instrumento en OnInit)
+double effectiveRr;
+int    effectiveMaxTrades;
+double effectiveTpAdv;
+int    ema200Length;
+int    imacdLength;
 
-// --- VARIABLES GLOBALES E INDICADORES ---
-int    handle_ema;
-double r_high = 0.0;
-double r_low  = 0.0;
-int    trades_count = 0;
-double current_sl = 0.0;
-double profit_inicio_dia = 0.0;
-datetime ultimo_dia = 0;
+// Instrument Flags
+bool isNasdaq = false;
+bool isGold   = false;
+bool isSilver = false;
 
-// PARÁMETROS EFECTIVOS PERSONALIZABLES POR INSTRUMENTO
-double effective_rr;
-int    effective_max_trades;
-int    effective_ema_period;
+// Variables de Estado y Tracking
+double tEnt            = 0.0;
+double tSl             = 0.0;
+double tTp             = 0.0;
+double tRisk           = 0.0;
+int    tradesToday     = 0;
+int    lastDayId       = 0;
+datetime lastBarTime   = 0;
 
-// HANDLES DE INDICADORES ADICIONALES (IMPULSE MACD)
-int    handle_imacd_ema1 = INVALID_HANDLE;
-int    handle_imacd_ema2 = INVALID_HANDLE;
-int    handle_imacd_hi   = INVALID_HANDLE;
-int    handle_imacd_lo   = INVALID_HANDLE;
-bool   imacd_long_ok     = true;
-bool   imacd_short_ok    = true;
+// Variables de Control de BE y Trailing (Comentado para pruebas de SL estático)
+bool   beActivated     = false;
+double beTrailDistance = 0.0;
+double maxPriceReached = 0.0;
 
-// VARIABLES PARA EL TRAIL DINÁMICO POR QUINTOS
-double t_ent = 0.0;       // Precio de entrada real
-double trail_step = 0.0;  // 1/5 de la distancia Entrada-SL en puntos
+// Horarios de sesión base
+int sessionStartHour = 9;
+int sessionStartMin  = 30;
+int sessionEndHour   = 9;
+int sessionEndMin    = 45;
+
+// EMA Handle
+int emaHandle = INVALID_HANDLE;
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
 //+------------------------------------------------------------------+
 int OnInit()
-  {
-   // Autodetección de activos
-   string symbol_lower = _Symbol;
-   StringToLower(symbol_lower);
-   bool is_nasdaq = (StringFind(symbol_lower, "nas") >= 0 || StringFind(symbol_lower, "us100") >= 0 || StringFind(symbol_lower, "nq") >= 0);
-   bool is_gold   = (StringFind(symbol_lower, "xau") >= 0 || StringFind(symbol_lower, "gold") >= 0);
-   bool is_us30   = (StringFind(symbol_lower, "us30") >= 0 || StringFind(symbol_lower, "dow") >= 0 || StringFind(symbol_lower, "ym") >= 0);
-
-   // Valores por defecto
-   effective_rr         = rr;
-   effective_max_trades = max_trades;
-   effective_ema_period = ema_period;
-
-   // Personalización por instrumento
-   if(is_nasdaq)
-     {
-      effective_rr         = 1.2;
-      effective_max_trades = 2;
-      effective_ema_period = 150;
-     }
-   else if(is_gold)
-     {
-      effective_rr         = 1.5;
-      effective_max_trades = 2;
-      effective_ema_period = 200;
-     }
-   else if(is_us30)
-     {
-      effective_rr         = 1.0;
-      effective_max_trades = 3;
-      effective_ema_period = 200;
-     }
-
-   handle_ema = iMA(_Symbol, _Period, effective_ema_period, 0, MODE_EMA, PRICE_CLOSE);
-   if(handle_ema == INVALID_HANDLE)
-     {
-      Print("Error al crear el handle de la EMA.");
+{
+   trade.SetExpertMagicNumber(MagicNumber);
+   
+   // Autodetección de Instrumento por Nombre
+   string symbolLower = Symbol();
+   StringToLower(symbolLower);
+   
+   isNasdaq = (StringFind(symbolLower, "nas100") >= 0 || StringFind(symbolLower, "nasdaq") >= 0 || StringFind(symbolLower, "us100") >= 0 || StringFind(symbolLower, "nq") >= 0);
+   isSilver = (StringFind(symbolLower, "xag") >= 0 || StringFind(symbolLower, "silver") >= 0 || StringFind(symbolLower, "plata") >= 0);
+   isGold   = (StringFind(symbolLower, "xau") >= 0 || StringFind(symbolLower, "gold") >= 0);
+   
+   // Cargar Parámetros según Instrumento
+   if(isNasdaq)
+   {
+      effectiveRr        = 1.2;
+      effectiveMaxTrades = 1;
+      ema200Length       = 50;
+      effectiveTpAdv     = 15.0;
+   }
+   else if(isGold)
+   {
+      effectiveRr        = 1.5;
+      effectiveMaxTrades = 1;
+      ema200Length       = 25;
+      effectiveTpAdv     = 0.50;
+   }
+   else if(isSilver)
+   {
+      effectiveRr        = 2.0;
+      effectiveMaxTrades = 1;
+      ema200Length       = 55;
+      effectiveTpAdv     = 0.50;
+   }
+   else
+   {
+      effectiveRr        = InpRR;
+      effectiveMaxTrades = InpMaxTrades;
+      ema200Length       = InpEma200Length;
+      effectiveTpAdv     = InpTpAdvPts;
+   }
+   
+   imacdLength = InpImacdLen;
+   
+   // Ajustar Horario de Sesión dependiente de Zona Horaria
+   if(TimezoneMode == 1) // America/Mexico_City
+   {
+      sessionStartHour = 8;
+      sessionStartMin  = 30;
+      sessionEndHour   = 8;
+      sessionEndMin    = 45;
+   }
+   else // America/New_York
+   {
+      sessionStartHour = 9;
+      sessionStartMin  = 30;
+      sessionEndHour   = 9;
+      sessionEndMin    = 45;
+   }
+   
+   // Inicializar EMA
+   emaHandle = iMA(Symbol(), PERIOD_M5, ema200Length, 0, MODE_EMA, PRICE_CLOSE);
+   if(emaHandle == INVALID_HANDLE)
+   {
+      Print("Error inicializando indicador EMA.");
       return(INIT_FAILED);
-     }
-
-   // Inicializar handles de Impulse MACD si está activo
-   if(use_imacd)
-     {
-      handle_imacd_ema1 = iMA(_Symbol, _Period, imacd_len, 0, MODE_EMA, PRICE_TYPICAL);
-      handle_imacd_ema2 = iMA(_Symbol, _Period, imacd_len, 0, MODE_EMA, handle_imacd_ema1);
-      handle_imacd_hi   = iMA(_Symbol, _Period, imacd_len, 0, MODE_SMMA, PRICE_HIGH);
-      handle_imacd_lo   = iMA(_Symbol, _Period, imacd_len, 0, MODE_SMMA, PRICE_LOW);
-      if(handle_imacd_ema1 == INVALID_HANDLE || handle_imacd_ema2 == INVALID_HANDLE || 
-         handle_imacd_hi == INVALID_HANDLE || handle_imacd_lo == INVALID_HANDLE)
-        {
-         Print("Error al crear los handles del Impulse MACD.");
-         return(INIT_FAILED);
-        }
-     }
-     
-   trade.SetExpertMagicNumber(magic_number);
-   ultimo_dia = 0;
+   }
+   
+   Print("EA Inicializado con éxito. Instrumento: ", Symbol(), 
+         " | RR: ", effectiveRr, 
+         " | Máx Trades: ", effectiveMaxTrades, 
+         " | EMA Período: ", ema200Length, 
+         " | TP Avance: ", effectiveTpAdv);
+         
    return(INIT_SUCCEEDED);
-  }
+}
 
 //+------------------------------------------------------------------+
 //| Expert deinitialization function                                 |
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
-  {
-   IndicatorRelease(handle_ema);
-   if(handle_imacd_ema1 != INVALID_HANDLE) IndicatorRelease(handle_imacd_ema1);
-   if(handle_imacd_ema2 != INVALID_HANDLE) IndicatorRelease(handle_imacd_ema2);
-   if(handle_imacd_hi != INVALID_HANDLE)   IndicatorRelease(handle_imacd_hi);
-   if(handle_imacd_lo != INVALID_HANDLE)   IndicatorRelease(handle_imacd_lo);
-   Comment("");
-  }
+{
+   IndicatorRelease(emaHandle);
+   ObjectDelete(0, "SL_Box");
+   ObjectDelete(0, "TP_Box");
+   ObjectDelete(0, "SessionBox");
+}
 
 //+------------------------------------------------------------------+
-//| Retorna el tipo de posición propia:                              |
-//|   POSITION_TYPE_BUY  (0) = hay un LONG abierto                  |
-//|   POSITION_TYPE_SELL (1) = hay un SHORT abierto                 |
-//|   -1                     = sin posición                         |
+//| Helper para calcular volumen por riesgo                          |
 //+------------------------------------------------------------------+
-int GetOwnPositionType()
-  {
-   for(int i = 0; i < PositionsTotal(); i++)
-     {
-      if(PositionGetSymbol(i) == _Symbol &&
-         PositionGetInteger(POSITION_MAGIC) == magic_number)
-         return (int)PositionGetInteger(POSITION_TYPE);
-     }
-   return -1;  // sin posición
-  }
+double CalculateRiskLot(double slDist)
+{
+   double riskAmount = AccountInfoDouble(ACCOUNT_EQUITY) * (InpRiskPerc / 100.0);
+   double tickValue  = SymbolInfoDouble(Symbol(), SYMBOL_TRADE_TICK_VALUE);
+   double tickSize   = SymbolInfoDouble(Symbol(), SYMBOL_TRADE_TICK_SIZE);
+   double point      = SymbolInfoDouble(Symbol(), SYMBOL_POINT);
+   
+   double lotSize = 0.0;
+   if(slDist > 0 && tickValue > 0)
+   {
+      lotSize = riskAmount / (slDist * tickValue / tickSize);
+   }
+   
+   double minLot  = SymbolInfoDouble(Symbol(), SYMBOL_VOLUME_MIN);
+   double maxLot  = SymbolInfoDouble(Symbol(), SYMBOL_VOLUME_MAX);
+   double stepLot = SymbolInfoDouble(Symbol(), SYMBOL_VOLUME_STEP);
+   
+   lotSize = MathFloor(lotSize / stepLot) * stepLot;
+   if(lotSize < minLot) lotSize = minLot;
+   if(lotSize > maxLot) lotSize = maxLot;
+   
+   return(lotSize);
+}
+
+//+------------------------------------------------------------------+
+//| Helper para calcular EMA del buffer                              |
+//+------------------------------------------------------------------+
+double GetEMA(int index)
+{
+   double values[1];
+   if(CopyBuffer(emaHandle, 0, index, 1, values) > 0)
+   {
+      return(values[0]);
+   }
+   return(0.0);
+}
+
+//+------------------------------------------------------------------+
+//| Helper para calcular RMA en un arreglo                           |
+//+------------------------------------------------------------------+
+double CalculateRMA(const double &price[], int size, int len, int targetIndex)
+{
+   double alpha = 1.0 / len;
+   double rma = price[size - 1];
+   for(int i = size - 2; i >= targetIndex; i--)
+   {
+      rma = price[i] * alpha + rma * (1.0 - alpha);
+   }
+   return(rma);
+}
+
+//+------------------------------------------------------------------+
+//| Helper para calcular Impulse MACD (iMACD)                        |
+//+------------------------------------------------------------------+
+double GetIMACD(int targetIndex, int len)
+{
+   int size = len * 5;
+   double highs[], lows[], closes[];
+   ArraySetAsSeries(highs, true);
+   ArraySetAsSeries(lows, true);
+   ArraySetAsSeries(closes, true);
+   
+   if(CopyHigh(Symbol(), PERIOD_M5, 0, size, highs) <= 0) return(0.0);
+   if(CopyLow(Symbol(), PERIOD_M5, 0, size, lows) <= 0) return(0.0);
+   if(CopyClose(Symbol(), PERIOD_M5, 0, size, closes) <= 0) return(0.0);
+   
+   double hlc3[];
+   ArrayResize(hlc3, size);
+   ArraySetAsSeries(hlc3, true);
+   for(int i = 0; i < size; i++)
+   {
+      hlc3[i] = (highs[i] + lows[i] + closes[i]) / 3.0;
+   }
+   
+   double ema1[];
+   ArrayResize(ema1, size - len);
+   ArraySetAsSeries(ema1, true);
+   double alpha = 2.0 / (len + 1.0);
+   
+   for(int j = 0; j < size - len; j++)
+   {
+      double ema = hlc3[size - 1];
+      for(int k = size - 2; k >= j; k--)
+      {
+         ema = hlc3[k] * alpha + ema * (1.0 - alpha);
+      }
+      ema1[j] = ema;
+   }
+   
+   double ema2_val = ema1[size - len - 1];
+   for(int i = size - len - 2; i >= targetIndex; i--)
+   {
+      ema2_val = ema1[i] * alpha + ema2_val * (1.0 - alpha);
+   }
+   double ema1_val = ema1[targetIndex];
+   double mi = ema1_val + (ema1_val - ema2_val);
+   
+   double hi = CalculateRMA(highs, size, len, targetIndex);
+   double lo = CalculateRMA(lows, size, len, targetIndex);
+   
+   if(mi > hi) return(mi - hi);
+   if(mi < lo) return(mi - lo);
+   return(0.0);
+}
+
+//+------------------------------------------------------------------+
+//| Dibujar Cajas Transparentes de SL y TP                           |
+//+------------------------------------------------------------------+
+void DrawInitBoxes(datetime entryTime, double entryPrice, double slVal, double tpVal)
+{
+   ObjectDelete(0, "SL_Box");
+   ObjectDelete(0, "TP_Box");
+   
+   datetime endTime = entryTime + PeriodSeconds(PERIOD_CURRENT) * 12; // Duración visible de 12 velas
+   
+   // Dibujar caja de SL (rojo transparente)
+   ObjectCreate(0, "SL_Box", OBJ_RECTANGLE, 0, entryTime, entryPrice, endTime, slVal);
+   ObjectSetInteger(0, "SL_Box", OBJPROP_COLOR, C'255,220,220');
+   ObjectSetInteger(0, "SL_Box", OBJPROP_FILL, true);
+   ObjectSetInteger(0, "SL_Box", OBJPROP_BACK, true);
+   ObjectSetInteger(0, "SL_Box", OBJPROP_SELECTABLE, false);
+   
+   // Dibujar caja de TP (verde transparente)
+   ObjectCreate(0, "TP_Box", OBJ_RECTANGLE, 0, entryTime, entryPrice, endTime, tpVal);
+   ObjectSetInteger(0, "TP_Box", OBJPROP_COLOR, C'220,255,220');
+   ObjectSetInteger(0, "TP_Box", OBJPROP_FILL, true);
+   ObjectSetInteger(0, "TP_Box", OBJPROP_BACK, true);
+   ObjectSetInteger(0, "TP_Box", OBJPROP_SELECTABLE, false);
+}
 
 //+------------------------------------------------------------------+
 //| Expert tick function                                             |
 //+------------------------------------------------------------------+
 void OnTick()
-  {
-   if(panic_close)
-     {
-      CerrarTodo();
-      DibujarTabla(0.0);
-      return;
-     }
-
-   // --- RESETEO DIARIO ---
-   MqlDateTime dt;
-   TimeToStruct(TimeCurrent(), dt);
-   datetime dia_actual = StringToTime(IntegerToString(dt.year)+"."+IntegerToString(dt.mon)+"."+IntegerToString(dt.day));
+{
+   // Evaluar ejecuciones al cierre de cada vela de 5 minutos
+   datetime currentBarTime = iTime(Symbol(), PERIOD_M5, 0);
+   if(currentBarTime == lastBarTime) return;
+   lastBarTime = currentBarTime;
    
-   if(dia_actual != ultimo_dia)
-     {
-      profit_inicio_dia = AccountInfoDouble(ACCOUNT_PROFIT);
-      r_high = 0.0;
-      r_low = 0.0;
-      trades_count = 0;
-      ultimo_dia = dia_actual;
-     }
-
-   double daily_profit = AccountInfoDouble(ACCOUNT_PROFIT) - profit_inicio_dia;
-
-   // --- ESCANEO HISTÓRICO DE VELAS PARA ASIGNAR EL RANGO ---
-   if(r_high == 0.0)
-     {
-      MqlRates rates[];
-      ArraySetAsSeries(rates, true);
-      int copiados = CopyRates(_Symbol, _Period, 0, 100, rates);
+   // Obtener datos del último día cerrado para reset de operaciones
+   MqlDateTime dt;
+   TimeToStruct(currentBarTime, dt);
+   int currentDayId = dt.year * 10000 + dt.mon * 100 + dt.day;
+   if(currentDayId != lastDayId)
+   {
+      tradesToday = 0;
+      lastDayId = currentDayId;
+      ObjectDelete(0, "SL_Box");
+      ObjectDelete(0, "TP_Box");
+      ObjectDelete(0, "SessionBox");
+   }
+   
+   // ============================================================================
+   // CALCULO DEL RANGO DE SESIÓN
+   // ============================================================================
+   int startGmtOffset = (TimezoneMode == 0) ? (IsDST ? -4 : -5) : -6;
+   int diffHours = BrokerGmtOffset - startGmtOffset;
+   
+   int sessionStartMinTotal = sessionStartHour * 60 + sessionStartMin + diffHours * 60;
+   int sessionEndMinTotal = sessionEndHour * 60 + sessionEndMin + diffHours * 60;
+   
+   // Obtener últimas 60 velas de 5 minutos
+   datetime times[60];
+   double highs[60], lows[60];
+   int copied = CopyTime(Symbol(), PERIOD_M5, 0, 60, times);
+   CopyHigh(Symbol(), PERIOD_M5, 0, 60, highs);
+   CopyLow(Symbol(), PERIOD_M5, 0, 60, lows);
+   
+   double rHighRaw = 0.0;
+   double rLowRaw = 0.0;
+   bool sessionBoxDrawn = false;
+   datetime sessionLeftTime = 0;
+   datetime sessionRightTime = 0;
+   
+   for(int i = 0; i < copied; i++)
+   {
+      MqlDateTime barDt;
+      TimeToStruct(times[i], barDt);
+      int barMinTotal = barDt.hour * 60 + barDt.min;
       
-      double temp_high = 0.0;
-      double temp_low = 999999.0;
-      bool rango_encontrado = false;
-      
-      for(int i = 0; i < copiados; i++)
-        {
-         MqlDateTime bar_dt;
-         TimeToStruct(rates[i].time, bar_dt);
-         
-         if(bar_dt.day == dt.day && bar_dt.mon == dt.mon && bar_dt.year == dt.year)
-           {
-            int m_actual = bar_dt.hour * 60 + bar_dt.min;
-            int m_inicio = start_hour * 60 + start_minute;
-            int m_fin    = end_hour * 60 + end_minute;
-            
-            if(m_actual >= m_inicio && m_actual < m_fin)
-              {
-               if(rates[i].high > temp_high) temp_high = rates[i].high;
-               if(rates[i].low < temp_low)   temp_low  = rates[i].low;
-               rango_encontrado = true;
-              }
-           }
-        }
-        
-      if(rango_encontrado)
-        {
-         r_high = temp_high;
-         r_low  = temp_low;
-        }
-     }
-
-   // --- EVALUACIÓN DE SESIÓN ACTUAL VIVA ---
-   int minutos_actuales = dt.hour * 60 + dt.min;
-   int minutos_inicio   = start_hour * 60 + start_minute;
-   int minutos_fin      = end_hour * 60 + end_minute;
-   bool in_sess = (minutos_actuales >= minutos_inicio && minutos_actuales < minutos_fin);
-
-   if(in_sess)
-     {
-      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      if(r_high == 0.0 || ask > r_high) r_high = ask;
-      if(r_low == 0.0 || bid < r_low)   r_low  = bid;
-     }
-
-   // --- CONDICIONES DE ENTRADA ---
-   double close_curr = SymbolInfoDouble(_Symbol, SYMBOL_LAST);
-   if(close_curr == 0) close_curr = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-
-   double ema_vals[];
-   ArraySetAsSeries(ema_vals, true);
-   if(CopyBuffer(handle_ema, 0, 0, 1, ema_vals) < 1) return;
-   double ema_trend = ema_vals[0];
-    // Evaluar Impulse MACD si está activo
-    imacd_long_ok  = true;
-    imacd_short_ok = true;
-    if(use_imacd && handle_imacd_ema1 != INVALID_HANDLE && handle_imacd_ema2 != INVALID_HANDLE && 
-       handle_imacd_hi != INVALID_HANDLE && handle_imacd_lo != INVALID_HANDLE)
+      if(barDt.day == dt.day && barDt.mon == dt.mon && barDt.year == dt.year)
       {
-       double ema1_val[], ema2_val[], hi_val[], lo_val[];
-       ArraySetAsSeries(ema1_val, true);
-       ArraySetAsSeries(ema2_val, true);
-       ArraySetAsSeries(hi_val, true);
-       ArraySetAsSeries(lo_val, true);
-       
-       if(CopyBuffer(handle_imacd_ema1, 0, 0, 1, ema1_val) > 0 &&
-          CopyBuffer(handle_imacd_ema2, 0, 0, 1, ema2_val) > 0 &&
-          CopyBuffer(handle_imacd_hi, 0, 0, 1, hi_val) > 0 &&
-          CopyBuffer(handle_imacd_lo, 0, 0, 1, lo_val) > 0)
+         if(barMinTotal >= sessionStartMinTotal && barMinTotal < sessionEndMinTotal)
          {
-          double mi = 2.0 * ema1_val[0] - ema2_val[0]; // ZLEMA
-          double md = 0.0;
-          if(mi > hi_val[0])      md = mi - hi_val[0];
-          else if(mi < lo_val[0]) md = mi - lo_val[0];
-          
-          imacd_long_ok  = (md > 0.0);
-          imacd_short_ok = (md < 0.0);
+            if(rHighRaw == 0.0 || highs[i] > rHighRaw) rHighRaw = highs[i];
+            if(rLowRaw == 0.0 || lows[i] < rLowRaw) rLowRaw = lows[i];
+            
+            if(sessionLeftTime == 0) sessionLeftTime = times[i];
+            sessionRightTime = times[i] + 300; // Agregar los 5 minutos de la vela
          }
       }
-
-   int  pos_type     = GetOwnPositionType(); // -1=ninguna, 0=BUY, 1=SELL
-   bool has_position = (pos_type != -1);
-
-   if(!in_sess && r_high > 0.0 && !has_position && trades_count < effective_max_trades)
-     {
-      bool body_up = (close_curr > r_high);
-      bool body_dn = (close_curr < r_low);
-      
-      // body_up: solo abre LONG si NO hay ya un SHORT contrario
-      // body_dn: solo abre SHORT si NO hay ya un LONG contrario
-      bool try_long  = body_up && close_curr > ema_trend && pos_type != POSITION_TYPE_SELL && imacd_long_ok;
-      bool try_short = body_dn && close_curr < ema_trend && pos_type != POSITION_TYPE_BUY && imacd_short_ok;
-
-      if(try_long || try_short)
-        {
-         current_sl = try_long ? r_low : r_high;
-         double dist_puntos = MathAbs(close_curr - current_sl);
-         
-         if(dist_puntos > 0)
-           {
-            double tick_size  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-            double tick_value = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
-            double pos_size   = risk_usd / ((dist_puntos / tick_size) * tick_value);
-            
-            double min_lot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-            double max_lot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
-            double step_lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
-            pos_size = MathFloor(pos_size / step_lot) * step_lot;
-            if(pos_size < min_lot) pos_size = min_lot;
-            if(pos_size > max_lot) pos_size = max_lot;
-
-            double target_p = try_long ? (close_curr + dist_puntos * effective_rr)
-                                       : (close_curr - dist_puntos * effective_rr);
-
-            if(try_long)
-              {
-               if(trade.Buy(pos_size, _Symbol, 0, current_sl, target_p, "9:30 NY Largo"))
-                 {
-                  trades_count++;
-                  t_ent = close_curr;
-                  trail_step = dist_puntos / 5.0;
-                  string msg = StringFormat("🔔 BreakoutNY - Nueva Compra (BUY) en %s\nPrecio: %s\nStop Loss: %s\nTake Profit: %s\nLote: %s", 
-                                            _Symbol, DoubleToString(close_curr, _Digits), DoubleToString(current_sl, _Digits), DoubleToString(target_p, _Digits), DoubleToString(pos_size, 2));
-                  EnviarMensajeTelegram(msg);
-                 }
-              }
-            else
-              {
-               if(trade.Sell(pos_size, _Symbol, 0, current_sl, target_p, "9:30 NY Corto"))
-                 {
-                  trades_count++;
-                  t_ent = close_curr;
-                  trail_step = dist_puntos / 5.0;
-                  string msg = StringFormat("🔔 BreakoutNY - Nueva Venta (SELL) en %s\nPrecio: %s\nStop Loss: %s\nTake Profit: %s\nLote: %s", 
-                                            _Symbol, DoubleToString(close_curr, _Digits), DoubleToString(current_sl, _Digits), DoubleToString(target_p, _Digits), DoubleToString(pos_size, 2));
-                  EnviarMensajeTelegram(msg);
-                 }
-              }
-           }
-        }
-     }
-
-   // --- GESTIÓN DE TRAILING STOP POR QUINTOS COMPLETOS ---
-   if(has_position)
-     {
-      if(t_ent == 0.0 || trail_step == 0.0)
-        {
-         t_ent = PositionGetDouble(POSITION_PRICE_OPEN);
-         double sl_inicial = PositionGetDouble(POSITION_SL);
-         if(sl_inicial > 0) trail_step = MathAbs(t_ent - sl_inicial) / 5.0;
-        }
-
-      long   type               = PositionGetInteger(POSITION_TYPE);
-      long   ticket             = PositionGetInteger(POSITION_TICKET);   // ticket para modify seguro
-      double current_position_sl = PositionGetDouble(POSITION_SL);
-
-      if(trail_step > 0)
-        {
-         if(type == POSITION_TYPE_BUY)
-           {
-            double recorrido = close_curr - t_ent;
-            int niveles_superados = (int)MathFloor(recorrido / trail_step);
-            
-            if(niveles_superados > 0)
-              {
-               double nuevo_sl = (t_ent - (trail_step * 5.0)) + (trail_step * niveles_superados);
-               nuevo_sl = NormalizeDouble(nuevo_sl, _Digits);
-               
-               double current_tp = PositionGetDouble(POSITION_TP);
-               if(nuevo_sl > current_position_sl)
-                 {
-                  trade.PositionModify(ticket, nuevo_sl, current_tp);  // usa ticket, no símbolo
-                 }
-              }
-           }
-         else if(type == POSITION_TYPE_SELL)
-           {
-            double recorrido = t_ent - close_curr;
-            int niveles_superados = (int)MathFloor(recorrido / trail_step);
-            
-            if(niveles_superados > 0)
-              {
-               double nuevo_sl = (t_ent + (trail_step * 5.0)) - (trail_step * niveles_superados);
-               nuevo_sl = NormalizeDouble(nuevo_sl, _Digits);
-               
-               double current_tp = PositionGetDouble(POSITION_TP);
-               if(nuevo_sl < current_position_sl || current_position_sl == 0)
-                 {
-                  trade.PositionModify(ticket, nuevo_sl, current_tp);  // usa ticket, no símbolo
-                 }
-              }
-           }
-        }
-     }
-   else
-     {
-      t_ent = 0.0;
-      trail_step = 0.0;
-     }
-
-   DibujarTabla(daily_profit);
-  }
-
-void CerrarTodo()
-  {
+   }
+   
+   // Dibujar caja de la sesión (amarilla)
+   if(rHighRaw > 0.0 && rLowRaw > 0.0)
+   {
+      ObjectDelete(0, "SessionBox");
+      ObjectCreate(0, "SessionBox", OBJ_RECTANGLE, 0, sessionLeftTime, rHighRaw, sessionRightTime, rLowRaw);
+      ObjectSetInteger(0, "SessionBox", OBJPROP_COLOR, clrOrange);
+      ObjectSetInteger(0, "SessionBox", OBJPROP_STYLE, STYLE_DOT);
+      ObjectSetInteger(0, "SessionBox", OBJPROP_SELECTABLE, false);
+   }
+   
+   // ============================================================================
+   // CONDICIONES DE ENTRADA Y DETECCIÓN DE POSICIÓN
+   // ============================================================================
+   MqlDateTime curBarDt;
+   TimeToStruct(currentBarTime, curBarDt);
+   int curBarMinTotal = curBarDt.hour * 60 + curBarDt.min;
+   bool afterSession = (curBarMinTotal >= sessionEndMinTotal) && (rHighRaw > 0.0) && (rLowRaw > 0.0);
+   
+   // Detección de Posiciones
+   bool outOfMarket = true;
+   bool inLong = false;
+   bool inShort = false;
    for(int i = PositionsTotal() - 1; i >= 0; i--)
-     {
-      if(PositionGetSymbol(i) == _Symbol &&
-         PositionGetInteger(POSITION_MAGIC) == magic_number)  // solo posiciones de este EA
-         trade.PositionClose(PositionGetTicket(i));
-     }
-  }
-
-void DibujarTabla(double daily_profit)
-  {
-   string texto = "=== PANEL DE CONTROL NY (5M) ===\n";
-   texto += "Profit Hoy: " + DoubleToString(daily_profit, 2) + " USD\n";
-   texto += "Trades Realizados: " + IntegerToString(trades_count) + " / " + IntegerToString(effective_max_trades) + "\n";
-   texto += "Rango Alto: " + DoubleToString(r_high, _Digits) + "\n";
-   texto += "Rango Bajo: " + DoubleToString(r_low, _Digits) + "\n";
-   texto += "Trail Step (Puntos): " + DoubleToString(trail_step, _Digits) + "\n"; 
-   texto += "Filtro iMACD: " + (use_imacd ? (imacd_long_ok ? "ALCISTA" : "BAJISTA") : "DESACTIVADO") + "\n";
-    texto += "Estado: " + (panic_close ? "🚨 PÁNICO ACTIVADO" : "🟢 OPERANDO AUTO") + "\n";
-    texto += "Calidad: " + (daily_profit >= 0.0 ? "🟢 BUENA" : "🔴 MEJORABLE");
+   {
+      if(PositionGetSymbol(i) == Symbol() && PositionGetInteger(POSITION_MAGIC) == MagicNumber)
+      {
+         outOfMarket = false;
+         long type = PositionGetInteger(POSITION_TYPE);
+         if(type == POSITION_TYPE_BUY) inLong = true;
+         if(type == POSITION_TYPE_SELL) inShort = true;
+      }
+   }
    
-   Comment(texto);
-  }
-
-//+------------------------------------------------------------------+
-//| Enviar mensaje a Telegram                                        |
-//+------------------------------------------------------------------+
-void EnviarMensajeTelegram(string message)
-  {
-   if(!InpUseTelegram || InpBotToken == "" || InpChatID == "")
-      return;
+   // Obtener cierres y aperturas (M5)
+   double c5_prev = iClose(Symbol(), PERIOD_M5, 2); // Vela 1 (Ruptura)
+   double o5      = iOpen(Symbol(), PERIOD_M5, 1);  // Vela 2 (Confirmación)
+   double c5      = iClose(Symbol(), PERIOD_M5, 1);  // Vela 2 (Confirmación)
+   double h5      = iHigh(Symbol(), PERIOD_M5, 1);
+   double l5      = iLow(Symbol(), PERIOD_M5, 1);
+   double h5_prev = iHigh(Symbol(), PERIOD_M5, 2);
+   double l5_prev = iLow(Symbol(), PERIOD_M5, 2);
+   double closeCurr = iClose(Symbol(), PERIOD_CURRENT, 0);
+   
+   // EMA de 5 minutos
+   double emaVal      = GetEMA(1);
+   double emaValPrev  = GetEMA(2);
+   
+   // Filtro Impulse MACD
+   double md5 = GetIMACD(1, imacdLength);
+   bool imacdLongOk5  = !InpUseImacd || (md5 > 0.0);
+   bool imacdShortOk5 = !InpUseImacd || (md5 < 0.0);
+   
+   // Condiciones de ruptura y confirmación
+   bool bodyUp = (c5_prev > rHighRaw) && (c5 >= o5) && (closeCurr > rHighRaw);
+   bool bodyDn = (c5_prev < rLowRaw)  && (c5 <= o5) && (closeCurr < rLowRaw);
+   
+   // Filtros finales
+   bool longC  = afterSession && bodyUp && (l5_prev > emaValPrev) && (l5 > emaVal) && imacdLongOk5 && outOfMarket && (tradesToday < effectiveMaxTrades);
+   bool shortC = afterSession && bodyDn && (h5_prev < emaValPrev) && (h5 < emaVal) && imacdShortOk5 && outOfMarket && (tradesToday < effectiveMaxTrades);
+   
+   // ============================================================================
+   // ENTRADAS
+   // ============================================================================
+   if(longC)
+   {
+      double ask = SymbolInfoDouble(Symbol(), SYMBOL_ASK);
+      tEnt = ask;
+      tSl  = rLowRaw;
+      tRisk = MathAbs(tEnt - tSl);
+      tTp  = tEnt + tRisk * effectiveRr;
       
-   if(MQLInfoInteger(MQL_TESTER))
-     {
-      Print("[Telegram Simulation] ", message);
-      return;
-     }
+      double lots = CalculateRiskLot(tRisk);
+      if(trade.Buy(lots, Symbol(), ask, tSl, tTp, "BreakoutNY L"))
+      {
+         tradesToday++;
+         DrawInitBoxes(currentBarTime, tEnt, tSl, tTp);
+         beActivated = false;
+         maxPriceReached = tEnt;
+      }
+   }
+   
+   if(shortC)
+   {
+      double bid = SymbolInfoDouble(Symbol(), SYMBOL_BID);
+      tEnt = bid;
+      tSl  = rHighRaw;
+      tRisk = MathAbs(tEnt - tSl);
+      tTp  = tEnt - tRisk * effectiveRr;
       
-   string url = "https://api.telegram.org/bot" + InpBotToken + "/sendMessage";
-   string headers = "Content-Type: application/x-www-form-urlencoded\r\n";
-   string postData = "chat_id=" + InpChatID + "&text=" + message;
+      double lots = CalculateRiskLot(tRisk);
+      if(trade.Sell(lots, Symbol(), bid, tSl, tTp, "BreakoutNY S"))
+      {
+         tradesToday++;
+         DrawInitBoxes(currentBarTime, tEnt, tSl, tTp);
+         beActivated = false;
+         maxPriceReached = tEnt;
+      }
+   }
    
-   char data[];
-   char result[];
-   string resHeaders;
-   
-   StringToCharArray(postData, data);
-   
-   int res = WebRequest("POST", url, headers, 3000, data, result, resHeaders);
-   if(res == 200)
-     {
-      Print("Mensaje de Telegram enviado con éxito.");
-     }
-   else
-     {
-      Print("Error al enviar mensaje a Telegram. Código: ", GetLastError());
-     }
-  }
+   // ============================================================================
+   // LÓGICA DINÁMICA DE TRAILING / BE (COMENTADA PARA PROBAR SL ESTÁTICO)
+   // ============================================================================
+   /*
+   if(!outOfMarket && tRisk > 0)
+   {
+      bool isLongTrade = inLong;
+      double closedHigh = iHigh(Symbol(), PERIOD_M5, 1);
+      double closedLow  = iLow(Symbol(), PERIOD_M5, 1);
+      
+      maxPriceReached = isLongTrade ? MathMax(maxPriceReached > 0 ? maxPriceReached : tEnt, closedHigh) 
+                                    : MathMin(maxPriceReached > 0 ? maxPriceReached : tEnt, closedLow);
+                                    
+      double priceMove = isLongTrade ? (maxPriceReached - tEnt) : (tEnt - maxPriceReached);
+      double tpDist = tRisk * effectiveRr;
+      
+      if(!beActivated)
+      {
+         if(priceMove >= tpDist * 3.0 / 5.0)
+         {
+            beActivated = true;
+            tSl = isLongTrade ? (tEnt + tpDist / 5.0) : (tEnt - tpDist / 5.0);
+            beTrailDistance = MathAbs(maxPriceReached - tSl);
+            tTp = isLongTrade ? maxPriceReached + effectiveTpAdv : maxPriceReached - effectiveTpAdv;
+            trade.PositionModify(Symbol(), tSl, tTp);
+         }
+      }
+      else
+      {
+         double newSl = isLongTrade ? MathMax(tSl, maxPriceReached - beTrailDistance) 
+                                    : MathMin(tSl, maxPriceReached + beTrailDistance);
+         double newTp = isLongTrade ? maxPriceReached + effectiveTpAdv 
+                                    : maxPriceReached - effectiveTpAdv;
+                                    
+         if(MathAbs(newSl - currentSL) > SymbolInfoDouble(Symbol(), SYMBOL_POINT) || 
+            MathAbs(newTp - currentTP) > SymbolInfoDouble(Symbol(), SYMBOL_POINT))
+         {
+            tSl = newSl;
+            tTp = newTp;
+            trade.PositionModify(Symbol(), tSl, tTp);
+         }
+      }
+   }
+   */
+}
+//+------------------------------------------------------------------+

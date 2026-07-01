@@ -19,28 +19,24 @@ gpRisk      = "--- GESTIÓN DE RIESGO ---"
 float rr        = input.float(0.90, "RR para TP", minval=0.1, step=0.1, group=gpRisk)
 int   maxTrades = input.int(3,    "Máx trades por día", minval=1, maxval=10, group=gpRisk)
 float riskPerc  = input.float(2.0, "Riesgo por operación (%)", minval=0.1, maxval=10.0, group=gpRisk, tooltip="Porcentaje de la equidad a arriesgar basado en el SL inicial")
+float tpAdvPts  = input.float(10.0, "Puntos de avance TP (BE)", minval=0.1, step=1.0, group=gpRisk, tooltip="Distancia en puntos para avanzar el TP delante del precio tras activar BE")
 
 // ─────────────────────────────────────────────
 // INPUTS - FILTROS DE ENTRADA / RANGO
 // ─────────────────────────────────────────────
 gpFilters      = "--- FILTROS DE ENTRADA ---"
-int   ema200LengthIn = input.int(200,  "Período EMA 200", minval=1, group=gpFilters)
+int   ema200LengthIn = input.int(50,  "Período EMA Tendencia", minval=1, group=gpFilters)
 bool  useImacd       = input.bool(false, "Usar Filtro Impulse MACD", group=gpFilters, tooltip="Evita falsos rompimientos alinear con la tendencia del Impulse MACD")
 int   imacdLen       = input.int(34, "Período Impulse MACD", minval=1, group=gpFilters)
 
-// ─────────────────────────────────────────────
-// INPUTS - PARÁMETROS ATR (TP)
-// ─────────────────────────────────────────────
-gpAtr       = "--- PARÁMETROS ATR ---"
-int   atrPeriod      = input.int(14, "Período ATR", minval=1, group=gpAtr)
-float atrMultiplier  = input.float(1.5, "Multiplicador ATR", minval=0.1, step=0.1, group=gpAtr)
+
 
 // ─────────────────────────────────────────────
 // AUTODETECCIÓN DE INSTRUMENTO
 // ─────────────────────────────────────────────
 tickerLower = str.lower(syminfo.ticker)
 isNasdaq    = str.contains(tickerLower, "nas100") or str.contains(tickerLower, "nasdaq") or str.contains(tickerLower, "us100") or str.contains(tickerLower, "nq")
-isUS30      = str.contains(tickerLower, "us30") or str.contains(tickerLower, "dow") or str.contains(tickerLower, "ym")
+isSilver    = str.contains(tickerLower, "xag") or str.contains(tickerLower, "silver") or str.contains(tickerLower, "plata")
 isGold      = str.contains(tickerLower, "xau") or str.contains(tickerLower, "gold")
 
 // ============================================================================
@@ -50,27 +46,26 @@ isGold      = str.contains(tickerLower, "xau") or str.contains(tickerLower, "gol
 // Variables de Estrategia reasignables por Instrumento
 float effectiveRr        = rr              // Ratio Riesgo Beneficio efectivo para el TP
 int   effectiveMaxTrades = maxTrades       // Cantidad máxima de trades permitidos por día
+float effectiveTpAdv     = tpAdvPts        // Puntos de avance del TP efectivos para BE
 
 // Parámetros de Indicadores reasignables por Instrumento
 int ema200Length         = ema200LengthIn  // Período de la media móvil exponencial (EMA)
 int imacdLength          = imacdLen        // Período del indicador Impulse MACD
-float effectiveAtrMult   = atrMultiplier   // Multiplicador ATR efectivo para el TP
-
 if isNasdaq
     effectiveRr        := 1.2
-    effectiveMaxTrades := 2
-    ema200Length       := 150
-   // effectiveAtrMult   := 1.5
+    effectiveMaxTrades := 1
+    ema200Length       := 50
+    effectiveTpAdv     := 15.0
 else if isGold
     effectiveRr        := 1.5
-    effectiveMaxTrades := 2
-    ema200Length       := 200
-    //effectiveAtrMult   := 2.0
-else if isUS30
-    effectiveRr        := 1.0
-    effectiveMaxTrades := 2
-    ema200Length       := 200
-    //effectiveAtrMult   := 1.5
+    effectiveMaxTrades := 1
+    ema200Length       := 25
+    effectiveTpAdv     := 0.50
+else if isSilver
+    effectiveRr        := 2
+    effectiveMaxTrades := 1
+    ema200Length       := 55
+    effectiveTpAdv     := 0.50
 
 // Variables de Estado y Tracking de Trades
 var float tEnt             = na   // Precio de entrada real de la operación
@@ -80,6 +75,13 @@ var float tRisk            = na   // Riesgo inicial en puntos (distancia entrada
 var int   tradesToday      = 0    // Conteo de operaciones ejecutadas hoy
 var int   lastDayId        = 0    // ID único del día actual para control de reset diario
 var int   sessionStartBar  = na   // Índice de barra del inicio de la sesión en el gráfico principal
+
+// Variables de control de Break-Even (BE) y Trailing
+var bool  beActivated      = false // Control para saber si el Break-Even ya se activó
+var float beTrailDistance  = na    // Distancia fija a la que el SL sigue al precio tras activar BE
+var float maxPriceReached  = na    // Máximo precio a favor alcanzado en velas cerradas de 5m
+
+
 
 // Zona horaria y horario actual
 string localTimezone       = syminfo.timezone // Zona horaria local del símbolo
@@ -126,38 +128,23 @@ int currentDay             = dayofmonth(time, targetTimezone)
 var box rangeBox           = na   // Caja naranja que enmarca el rango de la sesión
 
 // Líneas de dibujo para niveles de SL y TP iniciales (ancho de 1 vela)
+// Líneas de dibujo para niveles de SL y TP iniciales (ancho de 1 vela)
 var line slLineInicial     = na   // Línea horizontal del Stop Loss inicial (roja, sólida, ancho de 1 vela)
 var line tpLineInicial     = na   // Línea horizontal del Take Profit inicial (verde, sólida, ancho de 1 vela)
+var line entLineInicial    = na
 
-// Líneas de dibujo para niveles de SL y TP activos (que se mueven mientras la posición no sea cerrada)
-var line slLine            = na   // Línea horizontal del Stop Loss activo/trailing (roja, sólida)
-var line tpLine            = na   // Línea horizontal del Take Profit activo (verde, sólida)
 
-int barEntry  = na
 
 // ─────────────────────────────────────────────
 // FUNCIONES DE CÁLCULO (SL, TP, TRAILING, LOTAJE)
 // ─────────────────────────────────────────────
 
-// Calcular Take Profit dinámico basado en ATR (mínimo el TP definido por la estrategia)
-calcTP(isLong, entry, sl, rrRatio, atrVal, atrMult) =>
+// Calcular Take Profit fijo basado en riesgo
+calcTP(isLong, entry, sl, rrRatio) =>
     float risk = math.abs(entry - sl)
-    float fixedTp = risk * rrRatio
-    float atrTp = not na(atrVal) ? atrVal * atrMult : 0.0
-    float tpDistance = math.max(atrTp, fixedTp)
-    isLong ? entry + tpDistance : entry - tpDistance
+    isLong ? entry + risk * rrRatio : entry - risk * rrRatio
 
-// Calcular Trailing Stop dinámico por quintos
-calcTrailingSL(isLong, entry, currentSl, risk, priceHigh, priceLow, stepsDiv) =>
-    float nuevoSl = currentSl
-    float trail = risk / stepsDiv
-    if isLong
-        float steps = math.max(0.0, math.floor((priceHigh - entry) / trail))
-        nuevoSl := math.max(currentSl, (entry - risk) + steps * trail)
-    else
-        float steps = math.max(0.0, math.floor((entry - priceLow) / trail))
-        nuevoSl := math.min(currentSl, (entry + risk) - steps * trail)
-    nuevoSl
+
 
 // Calcular lotaje dinámico basado en riesgo
 calcQty(equity, riskPct, slDist) =>
@@ -193,15 +180,19 @@ calcularRango5m(tz, sHour, sMin, eHour, eMin) =>
 [rHighRaw, rLowRaw] = request.security(syminfo.tickerid, "5", calcularRango5m(targetTimezone, sessionStartHour, sessionStartMin, sessionEndHour, sessionEndMin), barmerge.gaps_off, barmerge.lookahead_off)
 
 // Obtener datos OHLC de 5 minutos (solo velas cerradas)
-float c5 = request.security(syminfo.tickerid, "5", close[1], barmerge.gaps_off, barmerge.lookahead_off)
-float h5 = request.security(syminfo.tickerid, "5", high[1], barmerge.gaps_off, barmerge.lookahead_off)
-float l5 = request.security(syminfo.tickerid, "5", low[1], barmerge.gaps_off, barmerge.lookahead_off)
+float c5_prev = request.security(syminfo.tickerid, "5", close[1], barmerge.gaps_off, barmerge.lookahead_off)
+float o5      = request.security(syminfo.tickerid, "5", open, barmerge.gaps_off, barmerge.lookahead_off)
+float c5      = request.security(syminfo.tickerid, "5", close, barmerge.gaps_off, barmerge.lookahead_off)
+float h5      = request.security(syminfo.tickerid, "5", high, barmerge.gaps_off, barmerge.lookahead_off)
+float l5      = request.security(syminfo.tickerid, "5", low, barmerge.gaps_off, barmerge.lookahead_off)
+float h5_prev = request.security(syminfo.tickerid, "5", high[1], barmerge.gaps_off, barmerge.lookahead_off)
+float l5_prev = request.security(syminfo.tickerid, "5", low[1], barmerge.gaps_off, barmerge.lookahead_off)
 
 // EMA 200 calculada en temporalidad de 5 minutos (solo velas cerradas)
-float ema200_5m = request.security(syminfo.tickerid, "5", ta.ema(close, ema200Length)[1], barmerge.gaps_off, barmerge.lookahead_off)
+float ema200_5m      = request.security(syminfo.tickerid, "5", ta.ema(close, ema200Length), barmerge.gaps_off, barmerge.lookahead_off)
+float ema200_5m_prev = request.security(syminfo.tickerid, "5", ta.ema(close, ema200Length)[1], barmerge.gaps_off, barmerge.lookahead_off)
 
-// ATR calculado en temporalidad de 5 minutos (solo velas cerradas)
-float atr5 = request.security(syminfo.tickerid, "5", ta.atr(atrPeriod)[1], barmerge.gaps_off, barmerge.lookahead_off)
+
 
 // Impulse MACD calculado en temporalidad de 5 minutos (solo velas cerradas)
 calcularImacd5m(len) =>
@@ -248,16 +239,23 @@ if inSession
 // CONDICIONES DE ENTRADA (Basadas en velas cerradas de 5m)
 // ─────────────────────────────────────────────
 bool afterSession = not inSession and not na(rHighRaw) and not na(rLowRaw)
-bool bodyUp = c5 > rHighRaw
-bool bodyDn = c5 < rLowRaw
+
+// OPCIÓN A: Entrada inmediata al cierre de la vela de ruptura (sin retraso)
+// bool bodyUp = c5 > rHighRaw
+// bool bodyDn = c5 < rLowRaw
+
+// OPCIÓN B: Con vela de confirmación no contraria (activa)
+bool bodyUp = c5_prev > rHighRaw and c5 >= o5 and close > rHighRaw
+bool bodyDn = c5_prev < rLowRaw and c5 <= o5 and close < rLowRaw
 
 // [MQ5-CRITICAL #1] DETECCIÓN DE DIRECCIÓN DE POSICIÓN
 bool inLong  = strategy.position_size > 0
 bool inShort = strategy.position_size < 0
+bool outOfMarket = strategy.position_size == 0
 
 // [MQ5-CRITICAL #2] FILTRO DE POSICIÓN CONTRARIA EN CONDICIONES DE ENTRADA
-bool longC  = afterSession and bodyUp and c5 > ema200_5m and imacdLongOk5 and not inShort and tradesToday < effectiveMaxTrades
-bool shortC = afterSession and bodyDn and c5 < ema200_5m and imacdShortOk5 and not inLong and tradesToday < effectiveMaxTrades
+bool longC  = afterSession and bodyUp and l5_prev > ema200_5m_prev and l5 > ema200_5m and imacdLongOk5 and outOfMarket and tradesToday < effectiveMaxTrades
+bool shortC = afterSession and bodyDn and h5_prev < ema200_5m_prev and h5 < ema200_5m and imacdShortOk5 and outOfMarket and tradesToday < effectiveMaxTrades
 
 // ─────────────────────────────────────────────
 // ENTRADAS
@@ -266,40 +264,75 @@ if longC
     tEnt        := close
     tSl         := rLowRaw
     tRisk       := math.abs(close - rLowRaw)
-    tTp         := calcTP(true, close, rLowRaw, effectiveRr, atr5, effectiveAtrMult)
+    tTp         := calcTP(true, close, rLowRaw, effectiveRr)
     tradesToday := tradesToday + 1
     qty          = calcQty(strategy.equity, riskPerc, tRisk)
     strategy.entry("L", strategy.long, qty=qty)
-    label.new(bar_index, low, "↑ COMPRA", color=color.green, textcolor=color.white, style=label.style_label_up, size=size.small) 
+    //label.new(bar_index, low, "↑ COMPRA", color=color.green, textcolor=color.white, style=label.style_label_up, size=size.small) 
     slLineInicial := line.new(bar_index, tSl, bar_index + 1, tSl, color=color.red, style=line.style_solid, width=2)
     tpLineInicial := line.new(bar_index, tTp, bar_index + 1, tTp, color=color.green, style=line.style_solid, width=2)
+    entLineInicial := line.new(bar_index, tEnt, bar_index + 1, tEnt, color=color.rgb(19, 15, 208), style=line.style_solid, width=2)
+    label.new(bar_index , tEnt, "Compra", color=color.green, textcolor=color.white, style=label.style_label_right, size=size.small)
+    beActivated     := false
+    beTrailDistance := na
+    maxPriceReached := close
+
 
 
 if shortC
     tEnt        := close
     tSl         := rHighRaw
     tRisk       := math.abs(close - rHighRaw)
-    tTp         := calcTP(false, close, rHighRaw, effectiveRr, atr5, effectiveAtrMult)
+    tTp         := calcTP(false, close, rHighRaw, effectiveRr)
     tradesToday := tradesToday + 1
     qty          = calcQty(strategy.equity, riskPerc, tRisk)
     strategy.entry("S", strategy.short, qty=qty)
-    label.new(bar_index, high, "↓ VENTA", color=color.red, textcolor=color.white, style=label.style_label_down, size=size.small)
+    //label.new(bar_index, high, "↓ VENTA", color=color.red, textcolor=color.white, style=label.style_label_down, size=size.small)
     slLineInicial := line.new(bar_index, tSl, bar_index + 1, tSl, color=color.red, style=line.style_solid, width=2)
     tpLineInicial := line.new(bar_index, tTp, bar_index + 1, tTp, color=color.green, style=line.style_solid, width=2)
+    entLineInicial := line.new(bar_index, tEnt, bar_index + 1, tEnt, color=color.rgb(19, 15, 208), style=line.style_solid, width=2)
+    label.new(bar_index , tEnt, "Venta", color=color.red, textcolor=color.white, style=label.style_label_right, size=size.small)
+    beActivated     := false
+    beTrailDistance := na
+    maxPriceReached := close
+    
 
 
 
 
-// ─────────────────────────────────────────────
-// TRAILING STOP CALCULADO EN VELAS DE 5M
-// ─────────────────────────────────────────────
-// [MQ5-CRITICAL #3] TRAILING STOP POR QUINTOS
-// ─────────────────────────────────────────────
-bool new5mBar = ta.change(time("5")) != 0
 
-if strategy.position_size != 0 and not na(tRisk)
-    if new5mBar
-        tSl := calcTrailingSL(strategy.position_size > 0, tEnt, tSl, tRisk, h5, l5, 5.0)
+// LÓGICA DINÁMICA DE TRAILING/BE (COMENTADA PARA PROBAR SL/TP ESTÁTICOS)
+// int time5m = request.security(syminfo.tickerid, "5", time, barmerge.gaps_off, barmerge.lookahead_off)
+// bool new5mBar = ta.change(time5m) != 0
+// 
+// if strategy.position_size != 0 and not na(tRisk)
+//     if new5mBar
+//         bool isLongTrade = strategy.position_size > 0
+//         
+//         // Obtener el precio cerrado más alto/bajo dependiendo de la temporalidad del gráfico actual
+//         float closedHigh = timeframe.isminutes and timeframe.multiplier < 5 ? h5 : high[1]
+//         float closedLow  = timeframe.isminutes and timeframe.multiplier < 5 ? l5 : low[1]
+//         
+//         // Actualizar el precio máximo/mínimo alcanzado a favor de la operación
+//         maxPriceReached := isLongTrade ? math.max(nz(maxPriceReached, tEnt), closedHigh) : math.min(nz(maxPriceReached, tEnt), closedLow)
+//         
+//         float priceMove = isLongTrade ? (maxPriceReached - tEnt) : (tEnt - maxPriceReached)
+//         float tpDist = tRisk * effectiveRr
+//         
+//         if not beActivated
+//             // Activar BE si el precio recorre 3/5 partes del camino al TP
+//             if priceMove >= tpDist * 3.0 / 5.0
+//                 beActivated     := true
+//                 tSl             := isLongTrade ? (tEnt + tpDist / 5.0) : (tEnt - tpDist / 5.0) // SL asegura 1/5 del TP
+//                 beTrailDistance := math.abs(maxPriceReached - tSl)
+//                 tTp             := isLongTrade ? maxPriceReached + effectiveTpAdv : maxPriceReached - effectiveTpAdv
+//         else
+//             // Si ya está activo, el SL avanza detrás del precio a la distancia guardada y el TP avanza los puntos configurados
+//             tSl             := isLongTrade ? math.max(tSl, maxPriceReached - beTrailDistance) : math.min(tSl, maxPriceReached + beTrailDistance)
+//             tTp             := isLongTrade ? maxPriceReached + effectiveTpAdv : maxPriceReached - effectiveTpAdv
+
+// Salida de Estrategia activa con niveles estáticos
+if strategy.position_size != 0
     strategy.exit("Exit", stop=tSl, limit=tTp)
 
 // ─────────────────────────────────────────────
@@ -318,37 +351,23 @@ if inSession and not na(sessionStartBar)
 
 
 
-// --- DIBUJADO DE LÍNEAS DE SL Y TP ---
-posOpened = ta.change(strategy.position_size) != 0 and strategy.position_size != 0
-
-// 2. Dibujar líneas de SL (rojo) y TP (verde) mientras la posición no sea cerrada
-if strategy.position_size != 0
-    int entryBar = strategy.opentrades.entry_bar_index(0)
-    if na(slLine)
-        slLine := line.new(entryBar, tSl, bar_index + 1, tSl, color=color.red, style=line.style_solid, width=2)
-        tpLine := line.new(entryBar, tTp, bar_index + 1, tTp, color=color.green, style=line.style_solid, width=2)
-    else
-        line.set_xy1(slLine, entryBar, tSl)
-        line.set_xy2(slLine, bar_index + 1, tSl)
-        line.set_xy1(tpLine, entryBar, tTp)
-        line.set_xy2(tpLine, bar_index + 1, tTp)
-else
-    if not na(slLine)
-        line.delete(slLine)
-        slLine := na
-    if not na(tpLine)
-        line.delete(tpLine)
-        tpLine := na
+// --- PLOTEO DE SEGUIMIENTO HISTÓRICO DE SL Y TP (Estilo ha_ema_multi con trackprice)
+plot(strategy.position_size != 0 ? tSl : na, "Stop Loss Trail", color=color.new(color.red, 20), style=plot.style_linebr, linewidth=2, trackprice=true)
+plot(strategy.position_size != 0 ? tTp : na, "Take Profit Trail", color=color.new(color.green, 20), style=plot.style_linebr, linewidth=2, trackprice=true)
 
 // ─────────────────────────────────────────────
-// DIBUJADO DE SEÑALES DE SALIDA Y TRAILING
+// DIBUJADO DE SEÑALES DE ENTRADA, SALIDA Y TRAILING
 // ─────────────────────────────────────────────
-isExit   = strategy.position_size[1] != 0 and strategy.position_size == 0
-isTpHit  = isExit and (strategy.position_size[1] > 0 ? high >= tTp[1] : low <= tTp[1])
-isSlHit  = isExit and not isTpHit
+isLongEntry  = strategy.position_size[1] <= 0 and strategy.position_size > 0
+isShortEntry = strategy.position_size[1] >= 0 and strategy.position_size < 0
+isLongExit   = strategy.position_size[1] > 0 and strategy.position_size <= 0
+isShortExit  = strategy.position_size[1] < 0 and strategy.position_size >= 0
 
-plotshape(isTpHit, "Take Profit Hit", shape.circle, location.abovebar, color.green, size=size.small)
-plotshape(isSlHit, "Stop Loss Hit", shape.circle, location.belowbar, color.red, size=size.small)
+plotshape(isLongEntry, "Long Entry Arrow", shape.arrowup, location.belowbar, color.green, size=size.normal)
+plotshape(isShortEntry, "Short Entry Arrow", shape.arrowdown, location.abovebar, color.red, size=size.normal)
+plotshape(isLongExit, "Long Exit Arrow", shape.arrowdown, location.abovebar, color.orange, size=size.normal)
+plotshape(isShortExit, "Short Exit Arrow", shape.arrowup, location.belowbar, color.orange, size=size.normal)
+
 plotshape(ta.change(tSl) != 0 and strategy.position_size != 0, "Trail Moved", shape.circle, location.abovebar, color.orange, size=size.tiny)
 
 // ─────────────────────────────────────────────
@@ -367,7 +386,7 @@ if barstate.islast
     table.cell(mainTable, 1, 2, "$" + str.tostring(strategy.equity, "#.##"), text_color=color.green, text_size=size.small)
     
     table.cell(mainTable, 0, 3, "Paso Trail:", text_color=color.white, text_size=size.small)
-    table.cell(mainTable, 1, 3, inTrade ? str.tostring(tRisk / 5.0, "#.####") : "-", text_color=color.white, text_size=size.small)
+    table.cell(mainTable, 1, 3, "-", text_color=color.white, text_size=size.small)
     
     table.cell(mainTable, 0, 4, "Filtro iMACD:", text_color=color.white, text_size=size.small)
     imacdStatus = not useImacd ? "DESACTIVADO" : md5 == 0.0 ? "RANGO" : md5 > 0.0 ? "ALCISTA" : "BAJISTA"

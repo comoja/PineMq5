@@ -64,5 +64,7 @@ trigger: always_on
       el TP avanza/retrocede 15pts dependiendo si es compra/venta
    
 
-     
+### Calculo por BE (cuando se solicite)
+- el sl avanza a la distancia que este del precio
+- cuando el precio >= TP * 3/5. entonces el SL = BE y avanza detras del precio a la distancia en puntos que haya quedado  y el TP avanza 10 pts del precio
           
