@@ -85,6 +85,7 @@ gpSes          = "--- CONTROL DE SESIÓN ---"
 useSessionIn   = input.bool(false, "Usar Sesión Horaria", group=gpSes,
                    tooltip="Desactivado por defecto. Activa si solo quieres operar en horas específicas.")
 sessionStrIn   = input.session("0800-1700", "Horario Operativo (UTC)", group=gpSes)
+timezoneIn     = input.string("America/New_York", "Zona Horaria de la Sesión", options=["America/New_York", "America/Mexico_City", "UTC"], group=gpSes)
 
 // ════════════════════════════════════════════════════════════════════
 // 4. AUTODETECCIÓN Y ASIGNACIÓN DE PARÁMETROS EFECTIVOS
@@ -135,6 +136,7 @@ tpChasePts     = tpChasePtsIn
 tpChaseOffset  = tpChaseOffsetIn
 useSession     = useSessionIn
 sessionStr     = sessionStrIn
+timezoneVal    = timezoneIn
 useFixedLot     = useFixedLotIn
 fixedLotValue   = fixedLotValIn
 maxRiskPerc     = maxRiskPercIn
@@ -154,7 +156,7 @@ if isGold
     useRSI         := false,     rsiOB          := 70.0,    rsiOS        := 30.0
     useHTF         := false
     useTPChase     := true,      tpChasePts     := 12.0,    tpChaseOffset := 12.0
-    useSession     := true,      sessionStr     := "0700-1700"
+    useSession     := true,      sessionStr     := "0700-1700", timezoneVal := "UTC"
     useFixedLot    := false,     fixedLotValue  := 0.01,    maxRiskPerc   := 5.0,     minStopsLevel := 0.0
 else if isSilver
     slBufferPts   := 0.0
@@ -258,7 +260,7 @@ plot(useEMA200 ? ema200 : na, "EMA 200", color=color.new(color.blue, 30), linewi
 // ════════════════════════════════════════════════════════════════════
 
 // --- FILTRO DE CONTROL HORARIO ---
-inSession = not useSession or not na(time(timeframe.period, sessionStr, "UTC"))
+inSession = not useSession or not na(time(timeframe.period, sessionStr, timezoneVal))
 
 // --- FILTRO DE ABERTURA DE EMAs ---
 distanciaEMAs = math.abs(emaFast - emaSlow)
