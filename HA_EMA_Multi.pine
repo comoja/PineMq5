@@ -152,7 +152,7 @@ if isGold
     useHAStrength  := false
     useEmaTendencia      := true
     useATRMin      := true,      atrMinUSD      := 3.5
-    useADX         := true,      adxMin         := 22.0  // Exige tendencia más fuerte
+    useADX         := true,      adxMin         := 22.0  // Exige tendencia confirmada
     useRSI         := false,     rsiOB          := 70.0,    rsiOS        := 30.0
     useHTF         := false
     useTPChase     := true,      tpChasePts     := 11.7,    tpChaseOffset := 11.7
@@ -306,18 +306,13 @@ htfShortOK = not useHTF or (close < htfEMA)
 // ════════════════════════════════════════════════════════════════════
 // 8. CONDICIONES DE ALINEACIÓN Y GATILLOS
 // ════════════════════════════════════════════════════════════════════
-// Filtro de cuerpo mínimo de la vela real (10% del ATR) — sincronizado con MQ5
-bodySize   = math.abs(close - open)
-strongBull = (close > open) and (bodySize >= atrVal * 0.05)
-strongBear = (close < open) and (bodySize >= atrVal * 0.05)
-
-isLongAligned  = (emaFast > emaSlow) and haGreen and strongBull and
+isLongAligned  = (emaFast > emaSlow) and haGreen and
                    imacdLongOK  and emaTendenciaLongOK  and haStrengthLong  and
                    haColorChangeLong and
                    inSession     and aberturaOK     and atrOK            and
                    adxOK         and rsiLongOK      and htfLongOK
 
-isShortAligned = (emaFast < emaSlow) and haRed and strongBear and
+isShortAligned = (emaFast < emaSlow) and haRed and
                    imacdShortOK and emaTendenciaShortOK and haStrengthShort and
                    haColorChangeShort and
                    inSession     and aberturaOK     and atrOK            and
@@ -555,16 +550,4 @@ if barstate.islast
     table.cell(mainTable, 1, 9, str.tostring(strategy.netprofit, "#.##") + " USD",
                text_color=strategy.netprofit >= 0 ? color.green : color.red, text_size=size.small)
 
-// ════════════════════════════════════════════════════════════════════
-// DEBUG TEMPORAL — eliminar cuando ya no se necesite
-// ════════════════════════════════════════════════════════════════════
-debugMode = input.bool(true, "Debug: mostrar filtros bloqueados", group="--- DEBUG (TEMPORAL) ---")
 
-plotchar(debugMode and not haColorChangeLong  and strategy.position_size == 0, "X: HA color viejo",   "▼", location.abovebar, color.red,    size=size.tiny)
-plotchar(debugMode and not strongBull         and strategy.position_size == 0, "X: Body pequeño",    "▼", location.abovebar, color.orange, size=size.tiny)
-plotchar(debugMode and not emaTendenciaLongOK and strategy.position_size == 0, "X: EMA plana/baja",  "▼", location.abovebar, color.blue,   size=size.tiny)
-plotchar(debugMode and not imacdLongOK        and strategy.position_size == 0, "X: iMACD bajista",   "▼", location.abovebar, color.purple, size=size.tiny)
-plotchar(debugMode and not aberturaOK         and strategy.position_size == 0, "X: EMAs cerradas",   "▼", location.abovebar, color.gray,   size=size.tiny)
-plotchar(debugMode and not atrOK              and strategy.position_size == 0, "X: ATR bajo",        "▼", location.abovebar, color.yellow, size=size.tiny)
-plotchar(debugMode and not adxOK              and strategy.position_size == 0, "X: ADX bajo",        "▼", location.abovebar, color.teal,   size=size.tiny)
-plotchar(debugMode and not inSession          and strategy.position_size == 0, "X: Fuera sesión",    "▼", location.abovebar, color.white,  size=size.tiny)
