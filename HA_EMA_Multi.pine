@@ -101,47 +101,55 @@ isSilver  = assetProfile == "Plata (XAGUSD)"   or (assetProfile == "Auto" and is
 isBitcoin = assetProfile == "Bitcoin (BTCUSD)" or (assetProfile == "Auto" and isBitcoinSymbol)
 isNasdaq  = assetProfile == "Nasdaq (NAS100)"  or (assetProfile == "Auto" and isNasdaqSymbol)
 
-// --- VARIABLEs DE LONGITUD / TIMEFRAME (Exigen tipo simple int / string, resueltas por ternarios) ---
-emaTF         = isGold ? timeframe.period : isSilver ? "15" : isBitcoin ? "15" : isNasdaq ? timeframe.period : emaTFInput
-emaFastLen    = isGold ? 8     : isSilver ? 9    : isBitcoin ? 9    : isNasdaq ? 9                : emaFastLenIn
-emaSlowLen    = isGold ? 22    : isSilver ? 21   : isBitcoin ? 21   : isNasdaq ? 21               : emaSlowLenIn
-swingPeriod   = isGold ? 8     : isSilver ? 5    : isBitcoin ? 5    : isNasdaq ? 5                : swingPeriodIn
-imacdLen      = isGold ? 35    : isSilver ? 35   : isBitcoin ? 35   : isNasdaq ? 35               : imacdLenIn
-emaTendenciaLen = isGold ? 200   : isSilver ? 100  : isBitcoin ? 100  : isNasdaq ? 100              : emaTendenciaLenIn
-atrFilterLen  = isGold ? 14    : isSilver ? 14   : isBitcoin ? 14   : isNasdaq ? 14               : atrFilterLenIn
-adxLen        = isGold ? 14    : isSilver ? 14   : isBitcoin ? 14   : isNasdaq ? 14               : adxLenIn
-rsiLen        = isGold ? 14    : isSilver ? 14   : isBitcoin ? 14   : isNasdaq ? 14               : rsiLenIn
-htfEMALen     = isGold ? 50    : isSilver ? 50   : isBitcoin ? 50   : isNasdaq ? 50               : htfEMALenIn
+// --- VARIABLES DE LONGITUD / TIMEFRAME ---
+isManual        = not (isGold or isSilver or isBitcoin or isNasdaq)
+emaTF           = isGold ? timeframe.period : isSilver ? "15" : isBitcoin ? "15" : isNasdaq ? timeframe.period : emaTFInput
+emaFastLen      = isGold ? 8   : isSilver ? 9   : isBitcoin ? 9   : isNasdaq ? 9   : emaFastLenIn
+emaSlowLen      = isGold ? 22  : isSilver ? 21  : isBitcoin ? 21  : isNasdaq ? 21  : emaSlowLenIn
+swingPeriod     = isGold ? 8   : isSilver ? 5   : isBitcoin ? 5   : isNasdaq ? 5   : swingPeriodIn
+emaTendenciaLen = isGold ? 200 : isSilver ? 100 : isBitcoin ? 100 : isNasdaq ? 100 : emaTendenciaLenIn
+// Períodos idénticos en todos los perfiles activos — Manual usa los inputs
+imacdLen     = isManual ? imacdLenIn     : 35
+atrFilterLen = isManual ? atrFilterLenIn : 14
+adxLen       = isManual ? adxLenIn       : 14
+rsiLen       = isManual ? rsiLenIn       : 14
+htfEMALen    = isManual ? htfEMALenIn    : 50
 
-// --- VARIABLES DINÁMICAS (Se inicializan con los inputs y se modifican mediante bloques IF/ELSE) ---
+// --- VARIABLES DINÁMICAS (inicializadas desde inputs, sobreescritas por perfil) ---
 slBufferPts   = slBufPtsIn
-rrRatio        = rrRatioIn
-useBE          = useBEIn
-beRatio        = beRatioIn
-useIMACD       = useIMACDIn
+rrRatio       = rrRatioIn
+useBE         = useBEIn
+beRatio       = beRatioIn
+useIMACD      = useIMACDIn
 useEMASpread  = useEMASprIn
 emaSpreadMult = emaSprMultIn
 useHAStrength = useHAStrIn
-useEmaTendencia    = useEmaTendenciaIn
+useEmaTendencia = useEmaTendenciaIn
 useATRMin     = useATRMinIn
 atrMinUSD     = atrMinUSDIn
-useADX         = useADXIn
-adxMin         = adxMinIn
-useRSI         = useRSIIn
-rsiOB          = rsiOBIn
-rsiOS          = rsiOSIn
-useHTF         = useHTFIn
-useTPChase     = useTPChaseIn
-tpChasePts     = tpChasePtsIn
-tpChaseOffset  = tpChaseOffsetIn
-useSession     = useSessionIn
-sessionStr     = sessionStrIn
-timezoneVal    = timezoneIn
-useFixedLot     = useFixedLotIn
-fixedLotValue   = fixedLotValIn
-maxRiskPerc     = maxRiskPercIn
-maxSpreadPoints = maxSpreadPointsIn
-minStopsLevel   = minStopsLevelIn
+useADX        = useADXIn
+adxMin        = adxMinIn
+useRSI        = useRSIIn
+rsiOB         = rsiOBIn
+rsiOS         = rsiOSIn
+useHTF        = useHTFIn
+useTPChase    = useTPChaseIn
+tpChasePts    = tpChasePtsIn
+tpChaseOffset = tpChaseOffsetIn
+useSession    = useSessionIn
+sessionStr    = sessionStrIn
+timezoneVal   = timezoneIn
+useFixedLot   = useFixedLotIn
+fixedLotValue = fixedLotValIn
+maxRiskPerc   = maxRiskPercIn
+minStopsLevel = minStopsLevelIn
+
+// Valores predeterminados para todos los perfiles activos (sobreescritos solo donde difieren)
+if not isManual
+    useHTF        := false
+    useFixedLot   := false
+    fixedLotValue := 0.01
+    minStopsLevel := 0.0
 
 if isGold
     slBufferPts    := 0.3
@@ -152,57 +160,50 @@ if isGold
     useHAStrength  := false
     useEmaTendencia      := true
     useATRMin      := true,      atrMinUSD      := 3.5
-    useADX         := true,      adxMin         := 22.0  // Exige tendencia confirmada
-    useRSI         := false,     rsiOB          := 70.0,    rsiOS        := 30.0
-    useHTF         := false
-    useTPChase     := true,      tpChasePts     := 11.7,    tpChaseOffset := 11.7
-    useSession     := true,      sessionStr     := "0700-1700", timezoneVal := "UTC"
-    useFixedLot    := false,     fixedLotValue  := 0.01,    maxRiskPerc   := 5.5,     minStopsLevel := 0.0
+    useADX         := true,      adxMin        := 22.0
+    useRSI         := false
+    useTPChase     := true,      tpChasePts    := 11.7,  tpChaseOffset := 11.7
+    useSession     := true,      sessionStr    := "0700-1700", timezoneVal := "UTC"
+    maxRiskPerc    := 5.5
 else if isSilver
-    slBufferPts   := 0.0
+    slBufferPts    := 0.0
     rrRatio        := 0.0
-    useBE          := false,     beRatio        := 1.0
+    useBE          := false,     beRatio       := 1.0
     useIMACD       := true
     useEMASpread  := false,    emaSpreadMult := 0.0
     useHAStrength := true
     useEmaTendencia      := true
     useATRMin     := false,    atrMinUSD     := 1.0
-    useADX         := false,    adxMin        := 22.0
-    useRSI         := false,    rsiOB         := 70.0,    rsiOS        := 30.0
-    useHTF         := false
-    useTPChase     := true,     tpChasePts     := 0.55,    tpChaseOffset := 0.55
+    useADX         := false,     adxMin        := 22.0
+    useRSI         := false
+    useTPChase     := true,      tpChasePts    := 0.55, tpChaseOffset := 0.55
     useSession     := false
-    useFixedLot    := false,    fixedLotValue  := 0.01,    maxRiskPerc   := 5.0,     minStopsLevel := 0.0
 else if isBitcoin
-    slBufferPts   := 0.0
+    slBufferPts    := 0.0
     rrRatio        := 1.8
-    useBE          := true,     beRatio        := 1.0
+    useBE          := true,      beRatio       := 1.0
     useIMACD       := true
     useEMASpread  := true,     emaSpreadMult := 0.3
     useHAStrength := true
     useEmaTendencia      := true
     useATRMin     := false,    atrMinUSD     := 2.0
-    useADX         := false,    adxMin        := 22.0
-    useRSI         := true,     rsiOB         := 70.0,    rsiOS        := 0.0
-    useHTF         := false
-    useTPChase     := true,     tpChasePts     := 150.0,   tpChaseOffset := 150.0
+    useADX         := false,     adxMin        := 22.0
+    useRSI         := true,      rsiOB         := 70.0,  rsiOS := 0.0
+    useTPChase     := true,      tpChasePts    := 150.0, tpChaseOffset := 150.0
     useSession     := false
-    useFixedLot    := false,    fixedLotValue  := 0.01,    maxRiskPerc   := 5.0,     minStopsLevel := 0.0
 else if isNasdaq
-    slBufferPts   := 0.0
+    slBufferPts    := 0.0
     rrRatio        := 1.5
-    useBE          := true,     beRatio        := 1.0
+    useBE          := true,      beRatio       := 1.0
     useIMACD       := false
-    useEMASpread  := false,    emaSpreadMult := 0.0
-    useHAStrength := false
-    useEmaTendencia      := false
-    useATRMin     := false,    atrMinUSD     := 2.0
-    useADX         := false,    adxMin        := 22.0
-    useRSI         := false,    rsiOB         := 75.0,    rsiOS        := 25.0
-    useHTF         := false
-    useTPChase     := true,     tpChasePts     := 15.0,    tpChaseOffset := 15.0
+    useEMASpread   := false,     emaSpreadMult := 0.0
+    useHAStrength  := false
+    useEmaTendencia := false
+    useATRMin      := false,     atrMinUSD     := 2.0
+    useADX         := false,     adxMin        := 22.0
+    useRSI         := false,     rsiOB         := 75.0,  rsiOS := 25.0
+    useTPChase     := true,      tpChasePts    := 15.0,  tpChaseOffset := 15.0
     useSession     := false
-    useFixedLot    := false,    fixedLotValue  := 0.01,    maxRiskPerc   := 5.0,     minStopsLevel := 0.0
 
 // --- VALIDACIÓN DE TEMPORALIDAD CORRECTA EN TRADINGVIEW ---
 correctTF = isGold ? "15" : isSilver ? "30" : isBitcoin ? "30" : isNasdaq ? "5" : ""
@@ -234,14 +235,11 @@ string resolvedTF = emaTF
 if emaTF == "Auto"
     resolvedTF := timeframe.period // Usa el gráfico actual (ej. 15min), igual que el .mq5
 
-// Cálculo de EMAs mediante request.security en la temporalidad resuelta
-emaFastBase = ta.ema(close, emaFastLen)
-emaSlowBase = ta.ema(close, emaSlowLen)
-emaTendenciaBase  = ta.ema(close, emaTendenciaLen)
-
-emaFast = request.security(syminfo.tickerid, resolvedTF, emaFastBase, lookahead=barmerge.lookahead_off)
-emaSlow = request.security(syminfo.tickerid, resolvedTF, emaSlowBase, lookahead=barmerge.lookahead_off)
-emaTendencia  = request.security(syminfo.tickerid, resolvedTF, emaTendenciaBase, lookahead=barmerge.lookahead_off)
+// EMAs: directas si mismo TF; request.security si TF difiere (Silver/Bitcoin 15min en gráfico 30min)
+needsMTF     = resolvedTF != timeframe.period
+emaFast      = needsMTF ? request.security(syminfo.tickerid, resolvedTF, ta.ema(close, emaFastLen),      lookahead=barmerge.lookahead_off) : ta.ema(close, emaFastLen)
+emaSlow      = needsMTF ? request.security(syminfo.tickerid, resolvedTF, ta.ema(close, emaSlowLen),      lookahead=barmerge.lookahead_off) : ta.ema(close, emaSlowLen)
+emaTendencia = needsMTF ? request.security(syminfo.tickerid, resolvedTF, ta.ema(close, emaTendenciaLen), lookahead=barmerge.lookahead_off) : ta.ema(close, emaTendenciaLen)
 
 plot(emaFast, "EMA Rápida", color=color.new(color.lime, 10), linewidth=2)
 plot(emaSlow, "EMA Lenta",  color=color.new(color.red,  10), linewidth=2)
@@ -255,8 +253,9 @@ plot(useEmaTendencia ? emaTendencia : na, "EMA Tendencia", color=color.new(color
 inSession = not useSession or not na(time(timeframe.period, sessionStr, timezoneVal))
 
 // --- FILTRO DE ABERTURA DE EMAs ---
+atrVal        = ta.atr(atrFilterLen)   // calculado aquí: compartido por aberturaOK y atrOK
 distanciaEMAs = math.abs(emaFast - emaSlow)
-aberturaOK    = not useEMASpread or (distanciaEMAs >= (ta.atr(14) * emaSpreadMult))
+aberturaOK    = not useEMASpread or (distanciaEMAs >= (atrVal * emaSpreadMult))
 
 // --- FILTRO IMPULSE MACD ---
 calcZLEMA(src, length) =>
@@ -288,9 +287,8 @@ haStrengthShort = not useHAStrength or (haHigh == haOpen)
 haColorChangeLong  = ta.barssince(haClose[1] < haOpen[1] and haClose > haOpen) <= 6
 haColorChangeShort = ta.barssince(haClose[1] > haOpen[1] and haClose < haOpen) <= 6
 
-// Filtros específicos de Oro adicionales
-atrVal  = ta.atr(atrFilterLen)
-atrOK   = not useATRMin or (atrVal >= atrMinUSD)
+// Filtros de volatilidad
+atrOK = not useATRMin or (atrVal >= atrMinUSD)
 
 [adxVal, diPlus, diMinus] = ta.dmi(adxLen, adxLen)
 adxOK = not useADX or (adxVal >= adxMin)
@@ -318,15 +316,9 @@ isShortAligned = (emaFast < emaSlow) and haRed and
                    inSession     and aberturaOK     and atrOK            and
                    adxOK         and rsiShortOK     and htfShortOK
 
-// Confirmación de velas consecutivas
-confirmBars = 1
-var int longCount  = 0
-var int shortCount = 0
-longCount  := isLongAligned  ? longCount[1]  + 1 : 0
-shortCount := isShortAligned ? shortCount[1] + 1 : 0
-
-triggerLong  = longCount  >= confirmBars and longCount[1]  < confirmBars
-triggerShort = shortCount >= confirmBars and shortCount[1] < confirmBars
+// Entrada solo en el primer bar de señal (flanco ascendente — evita re-entrar si la señal persiste)
+triggerLong  = isLongAligned  and not isLongAligned[1]
+triggerShort = isShortAligned and not isShortAligned[1]
 
 // ════════════════════════════════════════════════════════════════════
 // 9. GESTIÓN DEL RIESGO Y DETERMINACIÓN DEL NIVELES DE SL/TP
@@ -389,7 +381,7 @@ riskMaxOk    = riskInMoney <= maxRiskMoney
 
 // Simulación de spread
 spread = 0.0
-spreadOk = spread <= maxSpreadPoints
+spreadOk = spread <= maxSpreadPointsIn
 
 if triggerLong and strategy.position_size == 0 and riskMaxOk and spreadOk
     strategy.entry("Long", strategy.long, qty=qty)
