@@ -38,6 +38,8 @@ tpChasePtsIn = input.float(chase, "Distancia de Persecución TP (Pts)", minval=0
                  tooltip="Distancia en puntos/ticks desde el precio hasta el TP para activar la persecución.")
 tpChaseOffsetIn = input.float(chase, "Avance del TP (Pts)", minval=0.1, step=1.0, group=gpRisk,
                  tooltip="Distancia en puntos/ticks que se colocará el TP por delante del precio actual.")
+trailDivisionsIn = input.int(6, "Divisiones del Trailing (partes del recorrido TP→SL)", minval=1, maxval=20, group=gpRisk,
+                 tooltip="Número de partes en que se divide el recorrido SL→TP para avanzar el SL dinámico. Por defecto 6.")
 
 useFixedLotIn    = input.bool(false, "¿Usar Lote Fijo? (True=Fijo, False=Riesgo %)", group=gpRisk)
 fixedLotValIn    = input.float(0.01, "Valor de Lote Fijo (Lotes MT5, ej: 0.01)", group=gpRisk)
@@ -143,6 +145,7 @@ useFixedLot   = useFixedLotIn
 fixedLotValue = fixedLotValIn
 maxRiskPerc   = maxRiskPercIn
 minStopsLevel = minStopsLevelIn
+trailDivisions = isManual ? trailDivisionsIn : 6
 
 // Valores predeterminados para todos los perfiles activos (sobreescritos solo donde difieren)
 if not isManual
@@ -287,8 +290,10 @@ haStrengthShort = not useHAStrength or (haHigh == haOpen)
 haColorChangeLong  = ta.barssince(haClose[1] < haOpen[1] and haClose > haOpen) <= 6
 haColorChangeShort = ta.barssince(haClose[1] > haOpen[1] and haClose < haOpen) <= 6
 
-// Filtros de volatilidad
-atrOK = not useATRMin or (atrVal >= atrMinUSD)
+// Filtros de volatilidad y fuerza de vela
+atrOK      = not useATRMin or (atrVal >= atrMinUSD)
+strongBull = (close > open) and (math.abs(close - open) >= atrVal * 0.10)
+strongBear = (close < open) and (math.abs(close - open) >= atrVal * 0.10)
 
 [adxVal, diPlus, diMinus] = ta.dmi(adxLen, adxLen)
 adxOK = not useADX or (adxVal >= adxMin)
@@ -304,13 +309,13 @@ htfShortOK = not useHTF or (close < htfEMA)
 // ════════════════════════════════════════════════════════════════════
 // 8. CONDICIONES DE ALINEACIÓN Y GATILLOS
 // ════════════════════════════════════════════════════════════════════
-isLongAligned  = (emaFast > emaSlow) and haGreen and
+isLongAligned  = (emaFast > emaSlow) and haGreen and strongBull and
                    imacdLongOK  and emaTendenciaLongOK  and haStrengthLong  and
                    haColorChangeLong and
                    inSession     and aberturaOK     and atrOK            and
                    adxOK         and rsiLongOK      and htfLongOK
 
-isShortAligned = (emaFast < emaSlow) and haRed and
+isShortAligned = (emaFast < emaSlow) and haRed and strongBear and
                    imacdShortOK and emaTendenciaShortOK and haStrengthShort and
                    haColorChangeShort and
                    inSession     and aberturaOK     and atrOK            and
@@ -457,7 +462,7 @@ if strategy.position_size > 0 and not tpChaseTriggered
     recorrido = high - entryP
     niveles = math.floor(recorrido / trailStep)
     if niveles > 0
-        initialSL = entryP - (trailStep * 5.0)
+        initialSL = entryP - (trailStep * trailDivisions)
         nuevoSL = initialSL + (trailStep * niveles)
         if nuevoSL > activeSL
             activeSL := nuevoSL
@@ -466,7 +471,7 @@ else if strategy.position_size < 0 and not tpChaseTriggered
     recorrido = entryP - low
     niveles = math.floor(recorrido / trailStep)
     if niveles > 0
-        initialSL = entryP + (trailStep * 5.0)
+        initialSL = entryP + (trailStep * trailDivisions)
         nuevoSL = initialSL - (trailStep * niveles)
         if nuevoSL < activeSL or na(activeSL)
             activeSL := nuevoSL
