@@ -109,7 +109,7 @@ emaTF           = isGold ? timeframe.period : isSilver ? "15" : isBitcoin ? "15"
 emaFastLen      = isGold ? 8   : isSilver ? 9   : isBitcoin ? 9   : isNasdaq ? 9   : emaFastLenIn
 emaSlowLen      = isGold ? 22  : isSilver ? 21  : isBitcoin ? 21  : isNasdaq ? 21  : emaSlowLenIn
 swingPeriod     = isGold ? 8   : isSilver ? 5   : isBitcoin ? 5   : isNasdaq ? 5   : swingPeriodIn
-emaTendenciaLen = isGold ? 200 : isSilver ? 100 : isBitcoin ? 100 : isNasdaq ? 100 : emaTendenciaLenIn
+emaTendenciaLen = isGold ? 16 : isSilver ? 100 : isBitcoin ? 100 : isNasdaq ? 100 : emaTendenciaLenIn
 // Períodos idénticos en todos los perfiles activos — Manual usa los inputs
 imacdLen     = isManual ? imacdLenIn     : 35
 atrFilterLen = isManual ? atrFilterLenIn : 14
@@ -276,12 +276,9 @@ md = mi > hi ? mi - hi : mi < lo ? mi - lo : 0.0
 imacdLongOK  = not useIMACD or (md >= 0.0)   // md==0.0 en zona neutra al salir del rango: permitido
 imacdShortOK = not useIMACD or (md <= 0.0)   // md==0.0 en zona neutra al salir del rango: permitido
 
-// --- FILTROS DE OPTIMIZACIÓN SECUNDARIOS ---
-// Filtro de pendiente: la EMA100 debe estar subiendo para Longs, bajando para Shorts
-emaTendenciaRising  = emaTendencia > emaTendencia[3]   // pendiente alcista (comparada 3 velas atrás)
-emaTendenciaFalling = emaTendencia < emaTendencia[3]   // pendiente bajista
-emaTendenciaLongOK  = not useEmaTendencia or emaTendenciaRising
-emaTendenciaShortOK = not useEmaTendencia or emaTendenciaFalling
+// Filtro de posición: las EMAs rápida y lenta deben estar por encima de la EMA de tendencia para Longs, y por debajo para Shorts
+emaTendenciaLongOK  = not useEmaTendencia or (emaFast > emaTendencia and emaSlow > emaTendencia)
+emaTendenciaShortOK = not useEmaTendencia or (emaFast < emaTendencia and emaSlow < emaTendencia)
 
 haStrengthLong  = not useHAStrength or (haLow  == haOpen)
 haStrengthShort = not useHAStrength or (haHigh == haOpen)
