@@ -93,6 +93,7 @@ bool pasoLaMitad = false;
 bool slTrail = false;
 double tpChaseSlGap = 0.0;
 bool beAplicado = false;
+double activeChaseOffset = 0.0;
 
 // Registro de las últimas entradas para evitar re-entradas en la misma señal
 datetime lastEntryTimeLong = 0;
@@ -777,6 +778,7 @@ void ManageActivePosition()
             activeSL = 0.0; activeTP = 0.0; entryP = 0.0; entryT = 0;
             slPart = 0.0; tpPart = 0.0;
             pasoLaMitad = false; slTrail = false; tpChaseSlGap = 0.0; beAplicado = false;
+            activeChaseOffset = 0.0;
             ObjectDelete(0, "SL_Box");
             ObjectDelete(0, "TP_Box");
             UpdateDashboard();
@@ -801,6 +803,10 @@ void ManageActivePosition()
         tpPart = (activeTP > 0.0) ? MathAbs(activeTP - entryP) / (double)trailDivisions : 0.0;
         
         pasoLaMitad = false; slTrail = false; tpChaseSlGap = 0.0; beAplicado = false;
+        
+        double atrVal = CalculateATR(1, atrFilterLen);
+        activeChaseOffset = isGold ? (tpChaseOffset * atrVal) : tpChaseOffset;
+        
         posActiveLastTick = true;
         
         DrawInitBoxes(entryT, entryP, activeSL, activeTP);
@@ -818,9 +824,7 @@ void ManageActivePosition()
     
     double currentHigh = iHigh(Symbol(), _Period, 0);
     double currentLow = iLow(Symbol(), _Period, 0);
-    double atrVal = CalculateATR(1, atrFilterLen);
     
-    double chaseOffset = isGold ? (tpChaseOffset * atrVal) : tpChaseOffset;
     bool modified = false;
     
     if(inLong)
@@ -883,9 +887,9 @@ void ManageActivePosition()
                 modified = true;
             }
             
-            if(useTPChase && (activeTP > 0.0) && (activeTP - currentHigh <= tpChasePts))
+            if(useTPChase && (activeTP > 0.0) && (activeTP - currentHigh <= tpChasePts) && (currentHigh > iHigh(Symbol(), _Period, 1)))
             {
-                double potTP = NormalizeDouble(currentHigh + chaseOffset, digits);
+                double potTP = NormalizeDouble(currentHigh + activeChaseOffset, digits);
                 if(potTP > activeTP)
                 {
                     activeTP = potTP;
@@ -954,9 +958,9 @@ void ManageActivePosition()
                 modified = true;
             }
             
-            if(useTPChase && (activeTP > 0.0) && (currentLow - activeTP <= tpChasePts))
+            if(useTPChase && (activeTP > 0.0) && (currentLow - activeTP <= tpChasePts) && (currentLow < iLow(Symbol(), _Period, 1)))
             {
-                double potTP = NormalizeDouble(currentLow - chaseOffset, digits);
+                double potTP = NormalizeDouble(currentLow - activeChaseOffset, digits);
                 if(potTP < activeTP || activeTP == 0.0)
                 {
                     activeTP = potTP;

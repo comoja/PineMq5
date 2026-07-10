@@ -128,11 +128,11 @@ if isGold
     imacdLen      := 20
     imacdSignalLen := 3
     atrFilterLen  := 14
-    slBufferPts   := 0.0
-    rrRatio       := 1.8
+    slBufferPts   := 25.0
+    rrRatio       := 1.5
     useTPChase    := true
-    tpChasePts    := 12.0
-    tpChaseOffset := 0.75
+    tpChasePts    := 15.0
+    tpChaseOffset := 2.4
     maxRiskPerc   := 1.0
     trailDivisions := 4
     bodyMinMult   := 0.25 // fuerza de la vela mayor o igual al 25% del ATR
@@ -376,6 +376,7 @@ var bool pasoLaMitad = false
 var bool slTrail = false
 var float tpChaseSlGap = na
 var bool beAplicado = false
+var float activeChaseOffset = na
 
 var box initialSLBox = na
 var box initialTPBox = na
@@ -390,6 +391,7 @@ if posOpened
     slTrail          := false
     tpChaseSlGap     := na
     beAplicado       := false
+    activeChaseOffset := isGold ? (tpChaseOffset * atrVal) : tpChaseOffset
     
     // Eliminar cajas previas si existen
     box.delete(initialSLBox)
@@ -417,8 +419,6 @@ if strategy.position_size != 0 and not na(initialSLBox) and not na(initialTPBox)
     box.set_right(initialTPBox, bar_index)
 
 // Trailing dinámico en tiempo de ejecución (cada barra)
-chaseOffset = isGold ? (tpChaseOffset * atrVal) : tpChaseOffset
-
 if strategy.position_size > 0 and not na(slPart) and not na(tpPart)
     recorridoMax = high - entryP
     
@@ -450,8 +450,8 @@ if strategy.position_size > 0 and not na(slPart) and not na(tpPart)
         trailingSL = high - tpChaseSlGap
         if trailingSL > activeSL
             activeSL := trailingSL
-        if useTPChase and not na(activeTP) and (activeTP - high[1] <= tpChasePts)
-            activeTP := math.max(activeTP, high + chaseOffset)
+        if useTPChase and not na(activeTP) and (activeTP - high[1] <= tpChasePts) and (high > high[1])
+            activeTP := math.max(activeTP, high + activeChaseOffset)
 
 else if strategy.position_size < 0 and not na(slPart) and not na(tpPart)
     recorridoMax = entryP - low
@@ -484,8 +484,8 @@ else if strategy.position_size < 0 and not na(slPart) and not na(tpPart)
         trailingSL = low + tpChaseSlGap
         if trailingSL < activeSL or na(activeSL)
             activeSL := trailingSL
-        if useTPChase and not na(activeTP) and (low[1] - activeTP <= tpChasePts)
-            activeTP := math.min(activeTP, low - chaseOffset)
+        if useTPChase and not na(activeTP) and (low[1] - activeTP <= tpChasePts) and (low < low[1])
+            activeTP := math.min(activeTP, low - activeChaseOffset)
 
 // Resetear variables al no tener posición
 if strategy.position_size == 0
@@ -498,6 +498,7 @@ if strategy.position_size == 0
     slTrail := false
     tpChaseSlGap := na
     beAplicado := false
+    activeChaseOffset := na
 
 
 
