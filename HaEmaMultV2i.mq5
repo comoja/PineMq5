@@ -184,6 +184,7 @@ int OnInit()
     slowLen = InpEmaSlowLen;
     swingPeriod = InpSwingPeriod;
     imacdLen = InpImacdLen;
+    adxLen = 14;
     
     slBufferPts = InpSlBufPts;
     rrRatio = InpRrRatio;
