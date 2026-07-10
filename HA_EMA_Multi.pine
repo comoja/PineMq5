@@ -26,10 +26,10 @@ riskPerc     = input.float(1.0, "Riesgo por operación (%)", minval=0.1, maxval=
 useTP        = input.bool(true, "Usar Take Profit Fijo", group=gpRisk)
 rrRatioIn   = input.float(3.0, "Relación Riesgo/Recompensa (R:R)", minval=0.5, step=0.1, group=gpRisk,
                  tooltip="Oro sugerido: 3.0. Plata sugerido: 2.5.")
-useBEIn     = input.bool(true, "Mover a Break-Even (Precio Entrada)", group=gpRisk,
-                 tooltip="ACTIVADO: protege el capital moviendo el SL a precio de entrada cuando el precio avanza a tu favor.")
-beRatioIn   = input.float(1.0, "Multiplicador R:R para Break-Even", minval=0.3, step=0.1, group=gpRisk,
-                 tooltip="1.0 = mueve a Break-Even al alcanzar beneficio 1:1 R:R (seguridad absoluta).")
+// useBEIn     = input.bool(true, "Mover a Break-Even (Precio Entrada)", group=gpRisk,
+//                  tooltip="ACTIVADO: protege el capital moviendo el SL a precio de entrada cuando el precio avanza a tu favor.")
+// beRatioIn   = input.float(1.0, "Multiplicador R:R para Break-Even", minval=0.3, step=0.1, group=gpRisk,
+//                  tooltip="1.0 = mueve a Break-Even al alcanzar beneficio 1:1 R:R (seguridad absoluta).")
 useTPChaseIn = input.bool(false, "Usar Persecución de TP (TP Chasing)", group=gpRisk,
                  tooltip="ACTIVADO: el TP se aleja del precio si este se acerca a la distancia especificada.")
  
@@ -38,8 +38,8 @@ tpChasePtsIn = input.float(chase, "Distancia de Persecución TP (Pts)", minval=0
                  tooltip="Distancia en puntos/ticks desde el precio hasta el TP para activar la persecución.")
 tpChaseOffsetIn = input.float(chase, "Avance del TP (Pts)", minval=0.1, step=1.0, group=gpRisk,
                  tooltip="Distancia en puntos/ticks que se colocará el TP por delante del precio actual.")
-trailDivisionsIn = input.int(6, "Divisiones del Trailing (partes del recorrido TP→SL)", minval=1, maxval=20, group=gpRisk,
-                 tooltip="Número de partes en que se divide el recorrido SL→TP para avanzar el SL dinámico. Por defecto 6.")
+trailDivisionsIn = input.int(7, "Divisiones del Trailing (partes del recorrido TP→SL)", minval=1, maxval=20, group=gpRisk,
+                 tooltip="Número de partes en que se divide el recorrido SL→TP para avanzar el SL dinámico. Por defecto 7.")
 
 useFixedLotIn    = input.bool(false, "¿Usar Lote Fijo? (True=Fijo, False=Riesgo %)", group=gpRisk)
 fixedLotValIn    = input.float(0.01, "Valor de Lote Fijo (Lotes MT5, ej: 0.01)", group=gpRisk)
@@ -67,6 +67,8 @@ emaSprMultIn = input.float(0.4,  "Abertura Mínima EMAs manual (× ATR)", minval
 useHAStrIn   = input.bool(false, "Fuerza Heikin-Ashi manual", group=gpParam)
 useEmaTendenciaIn  = input.bool(false, "Filtro EMA Tendencia manual", group=gpParam)
 emaTendenciaLenIn  = input.int(100,    "Período EMA Tendencia manual", minval=1, group=gpParam)
+convergenciaMultIn = input.float(0.25, "Multiplicador de Convergencia manual (× ATR)", minval=0.01, step=0.01, group=gpParam,
+                        tooltip="Rango máximo de dispersión entre las 3 EMAs para considerarse convergentes. Por defecto 0.25.")
 
 // Filtros específicos adicionales manuales
 useATRMinIn   = input.bool(false, "Filtro ATR Mínimo manual", group=gpParam)
@@ -90,6 +92,58 @@ sessionStrIn   = input.session("0800-1700", "Horario Operativo (UTC)", group=gpS
 timezoneIn     = input.string("America/New_York", "Zona Horaria de la Sesión", options=["America/New_York", "America/Mexico_City", "UTC"], group=gpSes)
 
 // ════════════════════════════════════════════════════════════════════
+// 3.5. VARIABLES GLOBALES DE PARÁMETROS E INDICADORES (Reglas del Proyecto)
+// ════════════════════════════════════════════════════════════════════
+// Parámetros de Indicadores
+var int fastLen = 21       // Período de EMA rápida
+var int slowLen = 5       // Período de EMA lenta
+var int trendLen = 100     // Período de EMA de tendencia
+var int swingLen = 8       // Velas para Swing High/Low
+var int imacdPeriod = 35   // Período iMACD
+var int atrPeriod = 14     // Período ATR
+var int adxPeriod = 14     // Período ADX
+var int rsiPeriod = 14     // Período RSI
+var int htfLen = 50        // Período EMA HTF
+var float convergenciaMult = 0.25 // Multiplicador de convergencia para el rango de EMAs
+var int barUltimaEntradaLong  = na  // Guarda la barra de la última entrada en compra
+var int barUltimaEntradaShort = na  // Guarda la barra de la última entrada en venta
+
+// Gestión de Riesgo y Parámetros Operativos
+var float slBufferPts = 2.0
+var float rrRatio = 3.0
+// var bool useBE = true
+// var float beRatio = 1.0
+var bool useIMACD = false
+var bool useEMASpread = true
+var float emaSpreadMult = 0.4
+var bool useHAStrength = false
+var bool useEmaTendencia = false
+var bool useATRMin = false
+var float atrMinUSD = 2.0
+var bool useADX = false
+var float adxMin = 22.0
+var bool useRSI = false
+var float rsiOB = 70.0
+var float rsiOS = 30.0
+var bool useHTF = false
+var bool useTPChase = false
+var float tpChasePts = 3.0
+var float tpChaseOffset = 3.0
+var bool useSession = false
+var string sessionStr = "0800-1700"
+var string timezoneVal = "America/New_York"
+var bool useFixedLot = false
+var float fixedLotValue = 0.01
+var float maxRiskPerc = 5.0
+var float minStopsLevel = 0.0
+var int trailDivisions = 6
+
+// Detección y Variables de Huso Horario (Reglas del Proyecto)
+var string targetTimezone = "America/New_York" // Zona horaria de sesión activa
+var string nySession = "0800-1700"              // Horario operativo adaptado a NY
+var string cdmxSession = "0700-1600"            // Horario operativo adaptado a CDMX
+
+// ════════════════════════════════════════════════════════════════════
 // 4. AUTODETECCIÓN Y ASIGNACIÓN DE PARÁMETROS EFECTIVOS
 // ════════════════════════════════════════════════════════════════════
 tickerLower = str.lower(syminfo.ticker)
@@ -103,51 +157,51 @@ isSilver  = assetProfile == "Plata (XAGUSD)"   or (assetProfile == "Auto" and is
 isBitcoin = assetProfile == "Bitcoin (BTCUSD)" or (assetProfile == "Auto" and isBitcoinSymbol)
 isNasdaq  = assetProfile == "Nasdaq (NAS100)"  or (assetProfile == "Auto" and isNasdaqSymbol)
 
-// --- VARIABLES DE LONGITUD / TIMEFRAME ---
 isManual        = not (isGold or isSilver or isBitcoin or isNasdaq)
 emaTF           = isGold ? timeframe.period : isSilver ? "15" : isBitcoin ? "15" : isNasdaq ? timeframe.period : emaTFInput
-emaFastLen      = isGold ? 8   : isSilver ? 9   : isBitcoin ? 9   : isNasdaq ? 9   : emaFastLenIn
-emaSlowLen      = isGold ? 22  : isSilver ? 21  : isBitcoin ? 21  : isNasdaq ? 21  : emaSlowLenIn
-swingPeriod     = isGold ? 8   : isSilver ? 5   : isBitcoin ? 5   : isNasdaq ? 5   : swingPeriodIn
-emaTendenciaLen = isGold ? 16 : isSilver ? 100 : isBitcoin ? 100 : isNasdaq ? 100 : emaTendenciaLenIn
-// Períodos idénticos en todos los perfiles activos — Manual usa los inputs
-imacdLen     = isManual ? imacdLenIn     : 35
-atrFilterLen = isManual ? atrFilterLenIn : 14
-adxLen       = isManual ? adxLenIn       : 14
-rsiLen       = isManual ? rsiLenIn       : 14
-htfEMALen    = isManual ? htfEMALenIn    : 50
 
-// --- VARIABLES DINÁMICAS (inicializadas desde inputs, sobreescritas por perfil) ---
-slBufferPts   = slBufPtsIn
-rrRatio       = rrRatioIn
-useBE         = useBEIn
-beRatio       = beRatioIn
-useIMACD      = useIMACDIn
-useEMASpread  = useEMASprIn
-emaSpreadMult = emaSprMultIn
-useHAStrength = useHAStrIn
-useEmaTendencia = useEmaTendenciaIn
-useATRMin     = useATRMinIn
-atrMinUSD     = atrMinUSDIn
-useADX        = useADXIn
-adxMin        = adxMinIn
-useRSI        = useRSIIn
-rsiOB         = rsiOBIn
-rsiOS         = rsiOSIn
-useHTF        = useHTFIn
-useTPChase    = useTPChaseIn
-tpChasePts    = tpChasePtsIn
-tpChaseOffset = tpChaseOffsetIn
-useSession    = useSessionIn
-sessionStr    = sessionStrIn
-timezoneVal   = timezoneIn
-useFixedLot   = useFixedLotIn
-fixedLotValue = fixedLotValIn
-maxRiskPerc   = maxRiskPercIn
-minStopsLevel = minStopsLevelIn
-trailDivisions = isManual ? trailDivisionsIn : 6
+// Asignaciones por defecto basadas en los inputs
+fastLen := emaFastLenIn
+slowLen := emaSlowLenIn
+trendLen := emaTendenciaLenIn
+swingLen := swingPeriodIn
+imacdPeriod := imacdLenIn
+atrPeriod := atrFilterLenIn
+adxPeriod := adxLenIn
+rsiPeriod := rsiLenIn
+htfLen := htfEMALenIn
 
-// Valores predeterminados para todos los perfiles activos (sobreescritos solo donde difieren)
+slBufferPts := slBufPtsIn
+rrRatio := rrRatioIn
+// useBE := useBEIn
+// beRatio := beRatioIn
+useIMACD := useIMACDIn
+useEMASpread := useEMASprIn
+emaSpreadMult := emaSprMultIn
+useHAStrength := useHAStrIn
+useEmaTendencia := useEmaTendenciaIn
+useATRMin := useATRMinIn
+atrMinUSD := atrMinUSDIn
+useADX := useADXIn
+adxMin := adxMinIn
+useRSI := useRSIIn
+rsiOB := rsiOBIn
+rsiOS := rsiOSIn
+useHTF := useHTFIn
+useTPChase := useTPChaseIn
+tpChasePts := tpChasePtsIn
+tpChaseOffset := tpChaseOffsetIn
+useSession := useSessionIn
+sessionStr := sessionStrIn
+timezoneVal := timezoneIn
+useFixedLot := useFixedLotIn
+fixedLotValue := fixedLotValIn
+maxRiskPerc := maxRiskPercIn
+minStopsLevel := minStopsLevelIn
+trailDivisions := isManual ? trailDivisionsIn : 7
+convergenciaMult := isManual ? convergenciaMultIn : 0.25
+
+// Sobreescritura por perfil (encapsulado por instrumento)
 if not isManual
     useHTF        := false
     useFixedLot   := false
@@ -155,58 +209,136 @@ if not isManual
     minStopsLevel := 0.0
 
 if isGold
-    slBufferPts    := 0.3
-    rrRatio        := 2.1
-    useBE          := false,      beRatio        := 1.5   // Asegura BE a 1.5x de beneficio para proteger el capital
-    useIMACD       := true                               // Activado: Filtra rangos cuando md == 0.0
-    useEMASpread   := true,      emaSpreadMult  := 0.15  // Más estricto: evita falsas rupturas
-    useHAStrength  := false
-    useEmaTendencia      := true
-    useATRMin      := true,      atrMinUSD      := 3.5
-    useADX         := true,      adxMin        := 22.0
-    useRSI         := false
-    useTPChase     := true,      tpChasePts    := 11.7,  tpChaseOffset := 11.7
-    useSession     := true,      sessionStr    := "0700-1700", timezoneVal := "UTC"
-    maxRiskPerc    := 5.5
+    fastLen       := 10
+    slowLen       := 21
+    trendLen      := 16   // Restaurado a 16 según visualización del usuario
+    swingLen      := 12
+    imacdPeriod   := 35
+    atrPeriod     := 14
+    adxPeriod     := 14
+    rsiPeriod     := 14
+    htfLen        := 50
+    slBufferPts   := 0.5
+    rrRatio       := 2.0
+    // useBE         := false
+    // beRatio       := 1.8
+    useIMACD      := true
+    useEMASpread  := true
+    emaSpreadMult := 0.15
+    useHAStrength := false
+    useEmaTendencia := true
+    useATRMin     := true
+    atrMinUSD     := 1.5  // Corregido de 3.5 a 1.5 para mayor sensibilidad en 15m
+    useADX        := true
+    adxMin        := 22.0
+    useRSI        := false
+    useTPChase    := true
+    tpChasePts    := 11.7
+    tpChaseOffset := 11.7
+    useSession    := false
+    sessionStr    := "0700-1700"
+    timezoneVal   := "UTC"
+    maxRiskPerc   := 5.5
 else if isSilver
-    slBufferPts    := 0.0
-    rrRatio        := 0.0
-    useBE          := false,     beRatio       := 1.0
-    useIMACD       := true
-    useEMASpread  := false,    emaSpreadMult := 0.0
+    fastLen       := 9
+    slowLen       := 21
+    trendLen      := 100
+    swingLen      := 5
+    imacdPeriod   := 35
+    atrPeriod     := 14
+    adxPeriod     := 14
+    rsiPeriod     := 14
+    htfLen        := 50
+    slBufferPts   := 0.0
+    rrRatio       := 2.5  // Corregido de 0.0 a 2.5
+    // useBE         := false
+    // beRatio       := 1.0
+    useIMACD      := true
+    useEMASpread  := false
+    emaSpreadMult := 0.0
     useHAStrength := true
-    useEmaTendencia      := true
-    useATRMin     := false,    atrMinUSD     := 1.0
-    useADX         := false,     adxMin        := 22.0
-    useRSI         := false
-    useTPChase     := true,      tpChasePts    := 0.55, tpChaseOffset := 0.55
-    useSession     := false
+    useEmaTendencia := true
+    useATRMin     := false
+    atrMinUSD     := 1.0
+    useADX        := false
+    adxMin        := 22.0
+    useRSI        := false
+    useTPChase    := true
+    tpChasePts    := 0.55
+    tpChaseOffset := 0.55
+    useSession    := false
 else if isBitcoin
-    slBufferPts    := 0.0
-    rrRatio        := 1.8
-    useBE          := true,      beRatio       := 1.0
-    useIMACD       := true
-    useEMASpread  := true,     emaSpreadMult := 0.3
+    fastLen       := 9
+    slowLen       := 21
+    trendLen      := 100
+    swingLen      := 5
+    imacdPeriod   := 35
+    atrPeriod     := 14
+    adxPeriod     := 14
+    rsiPeriod     := 14
+    htfLen        := 50
+    slBufferPts   := 0.0
+    rrRatio       := 1.8
+    // useBE         := true
+    // beRatio       := 1.0
+    useIMACD      := true
+    useEMASpread  := true
+    emaSpreadMult := 0.3
     useHAStrength := true
-    useEmaTendencia      := true
-    useATRMin     := false,    atrMinUSD     := 2.0
-    useADX         := false,     adxMin        := 22.0
-    useRSI         := true,      rsiOB         := 70.0,  rsiOS := 0.0
-    useTPChase     := true,      tpChasePts    := 150.0, tpChaseOffset := 150.0
-    useSession     := false
+    useEmaTendencia := true
+    useATRMin     := false
+    atrMinUSD     := 2.0
+    useADX        := false
+    adxMin        := 22.0
+    useRSI        := true
+    rsiOB         := 70.0
+    rsiOS         := 0.0
+    useTPChase    := true
+    tpChasePts    := 150.0
+    tpChaseOffset := 150.0
+    useSession    := false
 else if isNasdaq
-    slBufferPts    := 0.0
-    rrRatio        := 1.5
-    useBE          := true,      beRatio       := 1.0
-    useIMACD       := false
-    useEMASpread   := false,     emaSpreadMult := 0.0
-    useHAStrength  := false
+    fastLen       := 9
+    slowLen       := 21
+    trendLen      := 100
+    swingLen      := 5
+    imacdPeriod   := 35
+    atrPeriod     := 14
+    adxPeriod     := 14
+    rsiPeriod     := 14
+    htfLen        := 50
+    slBufferPts   := 0.0
+    rrRatio       := 1.5
+    // useBE         := true
+    // beRatio       := 1.0
+    useIMACD      := false
+    useEMASpread  := false
+    emaSpreadMult := 0.0
+    useHAStrength := false
     useEmaTendencia := false
-    useATRMin      := false,     atrMinUSD     := 2.0
-    useADX         := false,     adxMin        := 22.0
-    useRSI         := false,     rsiOB         := 75.0,  rsiOS := 25.0
-    useTPChase     := true,      tpChasePts    := 15.0,  tpChaseOffset := 15.0
-    useSession     := false
+    useATRMin     := false
+    atrMinUSD     := 2.0
+    useADX        := false
+    adxMin        := 22.0
+    useRSI        := false
+    rsiOB         := 75.0
+    rsiOS         := 25.0
+    useTPChase    := true
+    tpChasePts    := 15.0
+    tpChaseOffset := 15.0
+    useSession    := false
+
+// Configuración de Zonas Horarias NY y CDMX
+targetTimezone := timezoneVal
+if targetTimezone == "America/New_York"
+    nySession := "0800-1700"
+    cdmxSession := "0700-1600"
+else if targetTimezone == "America/Mexico_City"
+    nySession := "0900-1800"
+    cdmxSession := "0800-1700"
+else // UTC
+    nySession := "1300-2200"
+    cdmxSession := "1200-2100"
 
 // --- VALIDACIÓN DE TEMPORALIDAD CORRECTA EN TRADINGVIEW ---
 correctTF = isGold ? "15" : isSilver ? "30" : isBitcoin ? "30" : isNasdaq ? "5" : ""
@@ -240,9 +372,9 @@ if emaTF == "Auto"
 
 // EMAs: directas si mismo TF; request.security si TF difiere (Silver/Bitcoin 15min en gráfico 30min)
 needsMTF     = resolvedTF != timeframe.period
-emaFast      = needsMTF ? request.security(syminfo.tickerid, resolvedTF, ta.ema(close, emaFastLen),      lookahead=barmerge.lookahead_off) : ta.ema(close, emaFastLen)
-emaSlow      = needsMTF ? request.security(syminfo.tickerid, resolvedTF, ta.ema(close, emaSlowLen),      lookahead=barmerge.lookahead_off) : ta.ema(close, emaSlowLen)
-emaTendencia = needsMTF ? request.security(syminfo.tickerid, resolvedTF, ta.ema(close, emaTendenciaLen), lookahead=barmerge.lookahead_off) : ta.ema(close, emaTendenciaLen)
+emaFast      = needsMTF ? request.security(syminfo.tickerid, resolvedTF, ta.ema(close, fastLen),      lookahead=barmerge.lookahead_off) : ta.ema(close, fastLen)
+emaSlow      = needsMTF ? request.security(syminfo.tickerid, resolvedTF, ta.ema(close, slowLen),      lookahead=barmerge.lookahead_off) : ta.ema(close, slowLen)
+emaTendencia = needsMTF ? request.security(syminfo.tickerid, resolvedTF, ta.ema(close, trendLen),     lookahead=barmerge.lookahead_off) : ta.ema(close, trendLen)
 
 plot(emaFast, "EMA Rápida", color=color.new(color.lime, 10), linewidth=2)
 plot(emaSlow, "EMA Lenta",  color=color.new(color.red,  10), linewidth=2)
@@ -256,7 +388,7 @@ plot(useEmaTendencia ? emaTendencia : na, "EMA Tendencia", color=color.new(color
 inSession = not useSession or not na(time(timeframe.period, sessionStr, timezoneVal))
 
 // --- FILTRO DE ABERTURA DE EMAs ---
-atrVal        = ta.atr(atrFilterLen)   // calculado aquí: compartido por aberturaOK y atrOK
+atrVal        = ta.atr(atrPeriod)   // calculado aquí: compartido por aberturaOK y atrOK
 distanciaEMAs = math.abs(emaFast - emaSlow)
 aberturaOK    = not useEMASpread or (distanciaEMAs >= (atrVal * emaSpreadMult))
 
@@ -268,17 +400,21 @@ calcZLEMA(src, length) =>
     ema1 + d
 
 imacdSrc = hlc3
-hi = ta.rma(high, imacdLen)
-lo = ta.rma(low, imacdLen)
-mi = calcZLEMA(imacdSrc, imacdLen)
+hi = ta.highest(high, imacdPeriod)
+lo = ta.lowest(low, imacdPeriod)
+mi = calcZLEMA(imacdSrc, imacdPeriod)
 md = mi > hi ? mi - hi : mi < lo ? mi - lo : 0.0
 
 imacdLongOK  = not useIMACD or (md >= 0.0)   // md==0.0 en zona neutra al salir del rango: permitido
 imacdShortOK = not useIMACD or (md <= 0.0)   // md==0.0 en zona neutra al salir del rango: permitido
 
-// Filtro de posición: las EMAs rápida y lenta deben estar por encima de la EMA de tendencia para Longs, y por debajo para Shorts
-emaTendenciaLongOK  = not useEmaTendencia or (emaFast > emaTendencia and emaSlow > emaTendencia)
-emaTendenciaShortOK = not useEmaTendencia or (emaFast < emaTendencia and emaSlow < emaTendencia)
+// Filtro de posición: la EMA rápida debe estar por encima de la EMA de tendencia para Longs, y por debajo para Shorts (evita bloqueos si la tendencia es menor a la lenta)
+emaTendenciaLongOK  = not useEmaTendencia or (emaFast > emaTendencia)
+emaTendenciaShortOK = not useEmaTendencia or (emaFast < emaTendencia)
+
+// Filtro de dirección de pendiente de la EMA de tendencia (azul)
+pendienteLong  = emaTendencia > emaTendencia[1]
+pendienteShort = emaTendencia < emaTendencia[1]
 
 haStrengthLong  = not useHAStrength or (haLow  == haOpen)
 haStrengthShort = not useHAStrength or (haHigh == haOpen)
@@ -292,41 +428,74 @@ atrOK      = not useATRMin or (atrVal >= atrMinUSD)
 strongBull = (close > open) and (math.abs(close - open) >= atrVal * 0.10)
 strongBear = (close < open) and (math.abs(close - open) >= atrVal * 0.10)
 
-[adxVal, diPlus, diMinus] = ta.dmi(adxLen, adxLen)
+[adxVal, diPlus, diMinus] = ta.dmi(adxPeriod, adxPeriod)
 adxOK = not useADX or (adxVal >= adxMin)
 
-rsiVal      = ta.rsi(close, rsiLen)
+rsiVal      = ta.rsi(close, rsiPeriod)
 rsiLongOK  = not useRSI or (rsiVal < rsiOB)
 rsiShortOK = not useRSI or (rsiVal > rsiOS)
 
-htfEMA      = request.security(syminfo.tickerid, "60", ta.ema(close, htfEMALen), lookahead=barmerge.lookahead_off)
+htfEMA      = request.security(syminfo.tickerid, "60", ta.ema(close, htfLen), lookahead=barmerge.lookahead_off)
 htfLongOK  = not useHTF or (close > htfEMA)
 htfShortOK = not useHTF or (close < htfEMA)
 
 // ════════════════════════════════════════════════════════════════════
-// 8. CONDICIONES DE ALINEACIÓN Y GATILLOS
+// 8. CONDICIONES DE ALINEACIÓN, CONVERGENCIA Y GATILLOS
 // ════════════════════════════════════════════════════════════════════
-isLongAligned  = (emaFast > emaSlow) and haGreen and strongBull and
+// Lógica de convergencia de EMAs (compresión de medias móviles 10, 16, 21)
+rangoEMAs = math.max(emaFast, math.max(emaSlow, emaTendencia)) - math.min(emaFast, math.min(emaSlow, emaTendencia))
+convergen = rangoEMAs <= (atrVal * convergenciaMult)
+
+// Lógica de ventana de cruce de EMAs reciente (máximo 6 velas atrás)
+cruceLong  = ta.crossover(emaFast, emaSlow)
+cruceShort = ta.crossunder(emaFast, emaSlow)
+
+cruceRecienteLong  = ta.barssince(cruceLong) <= 6
+cruceRecienteShort = ta.barssince(cruceShort) <= 6
+
+barraUltimoCruceLong  = ta.valuewhen(cruceLong, bar_index, 0)
+barraUltimoCruceShort = ta.valuewhen(cruceShort, bar_index, 0)
+
+// La señal es elegible si no hemos entrado en este mismo cruce
+cruceElegibleLong  = cruceRecienteLong and (na(barUltimaEntradaLong) or barUltimaEntradaLong < barraUltimoCruceLong)
+cruceElegibleShort = cruceRecienteShort and (na(barUltimaEntradaShort) or barUltimaEntradaShort < barraUltimoCruceShort)
+
+// Se consideran convergentes si estuvieron en compresión en las últimas 6 barras (ventana de persistencia)
+estabanConvergentes = ta.barssince(convergen) <= 6
+barraUltimaConvergencia = ta.valuewhen(convergen, bar_index, 0)
+
+// La ruptura es elegible si no hemos entrado en esta misma convergencia
+rupturaElegibleLong  = estabanConvergentes[1] and (na(barUltimaEntradaLong) or barUltimaEntradaLong < barraUltimaConvergencia)
+rupturaElegibleShort = estabanConvergentes[1] and (na(barUltimaEntradaShort) or barUltimaEntradaShort < barraUltimaConvergencia)
+
+// Ruptura de convergencia: la siguiente vela define dirección, alineada con el sesgo del último cruce físico
+ultimoCruceEsLong  = barraUltimoCruceLong >= barraUltimoCruceShort
+ultimoCruceEsShort = barraUltimoCruceShort >= barraUltimoCruceLong
+
+rupturaLong  = rupturaElegibleLong and ultimoCruceEsLong and haGreen and strongBull and imacdLongOK and inSession and atrOK and rsiLongOK
+rupturaShort = rupturaElegibleShort and ultimoCruceEsShort and haRed and strongBear and imacdShortOK and inSession and atrOK and rsiShortOK
+
+isLongAligned  = cruceElegibleLong and haGreen and strongBull and
                    imacdLongOK  and emaTendenciaLongOK  and haStrengthLong  and
-                   haColorChangeLong and
+                   haColorChangeLong and pendienteLong and
                    inSession     and aberturaOK     and atrOK            and
                    adxOK         and rsiLongOK      and htfLongOK
 
-isShortAligned = (emaFast < emaSlow) and haRed and strongBear and
+isShortAligned = cruceElegibleShort and haRed and strongBear and
                    imacdShortOK and emaTendenciaShortOK and haStrengthShort and
-                   haColorChangeShort and
+                   haColorChangeShort and pendienteShort and
                    inSession     and aberturaOK     and atrOK            and
                    adxOK         and rsiShortOK     and htfShortOK
 
-// Entrada solo en el primer bar de señal (flanco ascendente — evita re-entrar si la señal persiste)
-triggerLong  = isLongAligned  and not isLongAligned[1]
-triggerShort = isShortAligned and not isShortAligned[1]
+// Entrada en alineación de cruce elegible o en la ruptura de la convergencia (siguiente vela)
+triggerLong  = isLongAligned or rupturaLong
+triggerShort = isShortAligned or rupturaShort
 
 // ════════════════════════════════════════════════════════════════════
 // 9. GESTIÓN DEL RIESGO Y DETERMINACIÓN DEL NIVELES DE SL/TP
 // ════════════════════════════════════════════════════════════════════
-lowestLow   = ta.lowest(low, swingPeriod)
-highestHigh = ta.highest(high, swingPeriod)
+lowestLow   = ta.lowest(low, swingLen)
+highestHigh = ta.highest(high, swingLen)
 slBuffer    = slBufferPts * syminfo.mintick
 
 var float pendingSL = na
@@ -364,6 +533,10 @@ var float entryP      = na
 var bool  beTriggered      = false
 var bool  tpChaseTriggered = false  // true cuando el TP Chase se activa por primera vez
 var float tpChaseSlGap     = na     // distancia fija SL-precio al activarse tpChase
+var float slPart           = na     // Una parte (fracción) de la distancia del SL inicial
+var float tpPart           = na     // Una parte (fracción) de la distancia del TP inicial
+var bool  pasoLaMitad      = false  // Control de avance del SL a la mitad del TP
+var bool  slTrail          = false  // Control de activación de persecución dinámica
 
 // Cálculo de lotaje en base a riesgo inicial o lote fijo
 contractSize = isGold ? 100.0 : isSilver ? 5000.0 : isBitcoin ? 1.0 : isNasdaq ? 1.0 : 100.0
@@ -394,84 +567,117 @@ if triggerShort and strategy.position_size == 0 and riskMaxOk and spreadOk
 // Apertura del trade detectada
 posOpened = ta.change(strategy.position_size) != 0 and strategy.position_size != 0
 
+var box initialSLBox = na
+var box initialTPBox = na
+
 if posOpened
-    entryP      := strategy.position_avg_price
-    activeSL    := pendingSL
-    activeTP    := pendingTP
-    trailStep   := math.abs(entryP - activeSL) / 5.0
-    beTriggered := false
+    entryP           := strategy.position_avg_price
+    activeSL         := pendingSL
+    activeTP         := pendingTP
+    trailStep        := math.abs(entryP - activeSL) / 5.0
+    beTriggered      := false
+    slPart           := math.abs(entryP - activeSL) / trailDivisions
+    tpPart           := useTP ? math.abs(activeTP - entryP) / trailDivisions : na
+    pasoLaMitad      := false
+    slTrail          := false
+    tpChaseSlGap     := na
+    if strategy.position_size > 0
+        barUltimaEntradaLong := bar_index
+    if strategy.position_size < 0
+        barUltimaEntradaShort := bar_index
+    
+    // Eliminar cajas previas
+    box.delete(initialSLBox)
+    box.delete(initialTPBox)
+    
+    // Dibujar cajas iniciales de SL (rojo transparente) y TP (verde transparente)
+    if strategy.position_size > 0
+        initialSLBox := box.new(left=bar_index, top=entryP, right=bar_index, bottom=activeSL,
+                                 bgcolor=color.new(color.red, 90), border_color=color.new(color.red, 60),
+                                 border_style=line.style_dotted)
+        initialTPBox := box.new(left=bar_index, top=activeTP, right=bar_index, bottom=entryP,
+                                 bgcolor=color.new(color.green, 90), border_color=color.new(color.green, 60),
+                                 border_style=line.style_dotted)
+    else if strategy.position_size < 0
+        initialSLBox := box.new(left=bar_index, top=activeSL, right=bar_index, bottom=entryP,
+                                 bgcolor=color.new(color.red, 90), border_color=color.new(color.red, 60),
+                                 border_style=line.style_dotted)
+        initialTPBox := box.new(left=bar_index, top=entryP, right=bar_index, bottom=activeTP,
+                                 bgcolor=color.new(color.green, 90), border_color=color.new(color.green, 60),
+                                 border_style=line.style_dotted)
+
+// Extender el extremo derecho de las cajas iniciales de SL y TP
+if strategy.position_size != 0 and not na(initialSLBox) and not na(initialTPBox)
+    box.set_right(initialSLBox, bar_index)
+    box.set_right(initialTPBox, bar_index)
 
 // ════════════════════════════════════════════════════════════════════
 // 11. MOTOR DE GESTIÓN DINÁMICA: BREAK-EVEN Y TRAILING STOP
 // ════════════════════════════════════════════════════════════════════
 
-// --- PERSECUCIÓN DE TAKE PROFIT (TP CHASING) ---
-// Al primer disparo: mueve SL a la mitad del recorrido y abre trailing a esa distancia
-if strategy.position_size != 0 and useTPChase and not na(activeTP)
-    if strategy.position_size > 0
-        if (activeTP - high) <= tpChasePts
-            newTP = high + tpChaseOffset
-            if newTP > activeTP
-                activeTP := newTP
-                if not tpChaseTriggered
-                    halfTpSL         = entryP + (math.abs(newTP - entryP) / 2.0)
-                    activeSL         := math.min(halfTpSL, high - syminfo.mintick)
-                    tpChaseSlGap     := math.max(high - activeSL, syminfo.mintick)
-                    tpChaseTriggered := true
-    else if strategy.position_size < 0
-        if (low - activeTP) <= tpChasePts
-            newTP = low - tpChaseOffset
-            if newTP < activeTP
-                activeTP := newTP
-                if not tpChaseTriggered
-                    halfTpSL         = entryP - (math.abs(newTP - entryP) / 2.0)
-                    activeSL         := math.max(halfTpSL, low + syminfo.mintick)
-                    tpChaseSlGap     := math.max(activeSL - low, syminfo.mintick)
-                    tpChaseTriggered := true
-
-// --- SL DINÁMICO DESPUÉS DE ACTIVARSE EL TP CHASE ---
-if strategy.position_size != 0 and tpChaseTriggered and not na(tpChaseSlGap)
-    if strategy.position_size > 0
+// --- CÁLCULO Y GESTIÓN DINÁMICA POR PARTES (Reglas del Proyecto) ---
+if strategy.position_size > 0 and not na(slPart) and not na(tpPart)
+    recorridoMax = high - entryP
+    
+    if not slTrail
+        cercaDelTP = useTPChase and (activeTP - high <= tpChasePts)
+        // Si el precio supera N - 1 partes del TP o se acerca a la distancia de persecución
+        if recorridoMax >= (tpPart * (trailDivisions - 1.0)) or cercaDelTP
+            tpDistTotal = tpPart * trailDivisions
+            if (activeSL < entryP + (tpDistTotal / 2.0)) and not pasoLaMitad and not cercaDelTP
+                activeSL := entryP + (tpDistTotal / 2.0)
+                pasoLaMitad := true
+            else
+                slTrail := true
+                tpChaseSlGap := math.max(high - activeSL, syminfo.mintick)
+        else
+            // Escalamiento progresivo por partes del SL (acercándose a la entrada sin rebasarla)
+            for i = int(trailDivisions - 2) to 1
+                if recorridoMax >= (tpPart * i)
+                    nuevoSL = entryP - (slPart * (trailDivisions - i))
+                    if nuevoSL > activeSL
+                        activeSL := nuevoSL
+                    break
+    
+    // Si la persecución dinámica está activa
+    if slTrail and not na(tpChaseSlGap)
         trailingSL = high - tpChaseSlGap
         if trailingSL > activeSL
             activeSL := trailingSL
-    else if strategy.position_size < 0
+        // El TP solo avanza si está habilitado useTPChase y el precio se acerca a la distancia tpChasePts
+        if useTPChase and (activeTP - high <= tpChasePts)
+            activeTP := math.max(activeTP, high + tpChaseOffset)
+
+else if strategy.position_size < 0 and not na(slPart) and not na(tpPart)
+    recorridoMax = entryP - low
+    
+    if not slTrail
+        cercaDelTP = useTPChase and (low - activeTP <= tpChasePts)
+        // Si el precio supera N - 1 partes del TP o se acerca a la distancia de persecución
+        if recorridoMax >= (tpPart * (trailDivisions - 1.0)) or cercaDelTP
+            tpDistTotal = tpPart * trailDivisions
+            if (activeSL > entryP - (tpDistTotal / 2.0)) and not pasoLaMitad and not cercaDelTP
+                activeSL := entryP - (tpDistTotal / 2.0)
+                pasoLaMitad := true
+            else
+                slTrail := true
+                tpChaseSlGap := math.max(activeSL - low, syminfo.mintick)
+        else
+            // Escalamiento progresivo por partes del SL (acercándose a la entrada sin rebasarla)
+            for i = int(trailDivisions - 2) to 1
+                if recorridoMax >= (tpPart * i)
+                    nuevoSL = entryP + (slPart * (trailDivisions - i))
+                    if nuevoSL < activeSL or na(activeSL)
+                        activeSL := nuevoSL
+                    break
+    // Si la persecución dinámica está activa
+    if slTrail and not na(tpChaseSlGap)
         trailingSL = low + tpChaseSlGap
-        if trailingSL < activeSL
+        if trailingSL < activeSL or na(activeSL)
             activeSL := trailingSL
-
-// --- ACTIVACIÓN DEL BREAK-EVEN ---
-if strategy.position_size != 0 and useBE and not beTriggered and not tpChaseTriggered
-    distanciaInicial = math.abs(entryP - pendingSL)
-    if strategy.position_size > 0
-        recorrido = high - entryP
-        if recorrido >= (distanciaInicial * beRatio)
-            activeSL := entryP
-            beTriggered := true
-    else if strategy.position_size < 0
-        recorrido = entryP - low
-        if recorrido >= (distanciaInicial * beRatio)
-            activeSL := entryP
-            beTriggered := true
-
-// --- GESTIÓN DEL TRAILING STOP POR PARTES ---
-if strategy.position_size > 0 and not tpChaseTriggered
-    recorrido = high - entryP
-    niveles = math.floor(recorrido / trailStep)
-    if niveles > 0
-        initialSL = entryP - (trailStep * trailDivisions)
-        nuevoSL = initialSL + (trailStep * niveles)
-        if nuevoSL > activeSL
-            activeSL := nuevoSL
-
-else if strategy.position_size < 0 and not tpChaseTriggered
-    recorrido = entryP - low
-    niveles = math.floor(recorrido / trailStep)
-    if niveles > 0
-        initialSL = entryP + (trailStep * trailDivisions)
-        nuevoSL = initialSL - (trailStep * niveles)
-        if nuevoSL < activeSL or na(activeSL)
-            activeSL := nuevoSL
+        // El TP solo retrocede si está habilitado useTPChase y el precio se acerca a la distancia tpChasePts
+        if useTPChase and (low - activeTP <= tpChasePts)
+            activeTP := math.min(activeTP, low - tpChaseOffset)
 
 // Reseteo al cerrar posición
 if strategy.position_size == 0
@@ -482,6 +688,10 @@ if strategy.position_size == 0
     beTriggered      := false
     tpChaseTriggered := false
     tpChaseSlGap     := na
+    slPart           := na
+    tpPart           := na
+    pasoLaMitad      := false
+    slTrail          := false
 
 // Ejecución de salidas — se llama cada barra para que el TP chase actualice el limit dinámicamente
 if strategy.position_size > 0
@@ -539,9 +749,96 @@ if barstate.islast
     table.cell(mainTable, 1, 8, "$" + str.tostring(strategy.equity, "#.##"),
                text_color=color.green, text_size=size.small)
 
-
     table.cell(mainTable, 0, 9, "Rendimiento:",  text_color=color.white, text_size=size.small)
     table.cell(mainTable, 1, 9, str.tostring(strategy.netprofit, "#.##") + " USD",
                text_color=strategy.netprofit >= 0 ? color.green : color.red, text_size=size.small)
+
+    // // --- TABLA DE DIAGNÓSTICO DE FILTROS EN TIEMPO REAL ---
+    // var table diagTable = table.new(position.bottom_right, 4, 14,
+    //      bgcolor=color.new(color.black, 15), border_width=1, border_color=color.gray)
+    // 
+    // // Encabezados de diagnóstico
+    // table.cell(diagTable, 0, 0, "Filtro Entrada", bgcolor=color.new(color.navy, 30), text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 1, 0, "Valor Actual", bgcolor=color.new(color.navy, 30), text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 2, 0, "Long (Compra)", bgcolor=color.new(color.navy, 30), text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 3, 0, "Short (Venta)", bgcolor=color.new(color.navy, 30), text_color=color.white, text_size=size.small)
+    // 
+    // // Fila 1: Sesión Operativa
+    // table.cell(diagTable, 0, 1, "1. Horario Sesión", text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 1, 1, inSession ? "Activa" : "Cerrada", text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 2, 1, inSession ? "OK" : "NO", bgcolor=inSession ? color.new(color.green, 60) : color.new(color.red, 60), text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 3, 1, inSession ? "OK" : "NO", bgcolor=inSession ? color.new(color.green, 60) : color.new(color.red, 60), text_color=color.white, text_size=size.small)
+    // 
+    // // Fila 2: Abertura EMAs
+    // table.cell(diagTable, 0, 2, "2. Abertura EMAs", text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 1, 2, str.tostring(distanciaEMAs, "#.##") + " / " + str.tostring(atrVal * emaSpreadMult, "#.##"), text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 2, 2, aberturaOK and (emaFast > emaSlow) ? "OK" : "NO", bgcolor=aberturaOK and (emaFast > emaSlow) ? color.new(color.green, 60) : color.new(color.red, 60), text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 3, 2, aberturaOK and (emaFast < emaSlow) ? "OK" : "NO", bgcolor=aberturaOK and (emaFast < emaSlow) ? color.new(color.green, 60) : color.new(color.red, 60), text_color=color.white, text_size=size.small)
+    // 
+    // // Fila 3: Impulse MACD
+    // table.cell(diagTable, 0, 3, "3. Impulse MACD", text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 1, 3, str.tostring(md, "#.####"), text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 2, 3, imacdLongOK ? "OK" : "NO", bgcolor=imacdLongOK ? color.new(color.green, 60) : color.new(color.red, 60), text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 3, 3, imacdShortOK ? "OK" : "NO", bgcolor=imacdShortOK ? color.new(color.green, 60) : color.new(color.red, 60), text_color=color.white, text_size=size.small)
+    // 
+    // // Fila 4: Tendencia EMA
+    // table.cell(diagTable, 0, 4, "4. Tendencia EMA", text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 1, 4, "Len: " + str.tostring(trendLen), text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 2, 4, emaTendenciaLongOK ? "OK" : "NO", bgcolor=emaTendenciaLongOK ? color.new(color.green, 60) : color.new(color.red, 60), text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 3, 4, emaTendenciaShortOK ? "OK" : "NO", bgcolor=emaTendenciaShortOK ? color.new(color.green, 60) : color.new(color.red, 60), text_color=color.white, text_size=size.small)
+    // 
+    // // Fila 5: Heikin-Ashi Fuerza
+    // table.cell(diagTable, 0, 5, "5. HA Fuerza", text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 1, 5, haGreen ? "Verde" : "Rojo", text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 2, 5, haGreen and haStrengthLong ? "OK" : "NO", bgcolor=haGreen and haStrengthLong ? color.new(color.green, 60) : color.new(color.red, 60), text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 3, 5, haRed and haStrengthShort ? "OK" : "NO", bgcolor=haRed and haStrengthShort ? color.new(color.green, 60) : color.new(color.red, 60), text_color=color.white, text_size=size.small)
+    // 
+    // // Fila 6: HA Giro Color
+    // table.cell(diagTable, 0, 6, "6. HA Giro Color", text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 1, 6, "Atrás: " + str.tostring(ta.barssince(haClose[1] < haOpen[1] and haClose > haOpen)) + " vel", text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 2, 6, haColorChangeLong ? "OK" : "NO", bgcolor=haColorChangeLong ? color.new(color.green, 60) : color.new(color.red, 60), text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 3, 6, haColorChangeShort ? "OK" : "NO", bgcolor=haColorChangeShort ? color.new(color.green, 60) : color.new(color.red, 60), text_color=color.white, text_size=size.small)
+    // 
+    // // Fila 7: Volatilidad ATR
+    // table.cell(diagTable, 0, 7, "7. Volatilidad ATR", text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 1, 7, str.tostring(atrVal, "#.##") + " >= " + str.tostring(atrMinUSD, "#.##"), text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 2, 7, atrOK ? "OK" : "NO", bgcolor=atrOK ? color.new(color.green, 60) : color.new(color.red, 60), text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 3, 7, atrOK ? "OK" : "NO", bgcolor=atrOK ? color.new(color.green, 60) : color.new(color.red, 60), text_color=color.white, text_size=size.small)
+    // 
+    // // Fila 8: Fuerza Vela
+    // table.cell(diagTable, 0, 8, "8. Cuerpo Vela", text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 1, 8, str.tostring(math.abs(close - open), "#.##") + " >= " + str.tostring(atrVal * 0.10, "#.##"), text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 2, 8, strongBull ? "OK" : "NO", bgcolor=strongBull ? color.new(color.green, 60) : color.new(color.red, 60), text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 3, 8, strongBear ? "OK" : "NO", bgcolor=strongBear ? color.new(color.green, 60) : color.new(color.red, 60), text_color=color.white, text_size=size.small)
+    // 
+    // // Fila 9: Fuerza ADX
+    // table.cell(diagTable, 0, 9, "9. Fuerza ADX", text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 1, 9, str.tostring(adxVal, "#.##") + " >= " + str.tostring(adxMin, "#.##"), text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 2, 9, adxOK ? "OK" : "NO", bgcolor=adxOK ? color.new(color.green, 60) : color.new(color.red, 60), text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 3, 9, adxOK ? "OK" : "NO", bgcolor=adxOK ? color.new(color.green, 60) : color.new(color.red, 60), text_color=color.white, text_size=size.small)
+    // 
+    // // Fila 10: Filtro RSI
+    // table.cell(diagTable, 0, 10, "10. Filtro RSI", text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 1, 10, str.tostring(rsiVal, "#.##"), text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 2, 10, rsiLongOK ? "OK" : "NO", bgcolor=rsiLongOK ? color.new(color.green, 60) : color.new(color.red, 60), text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 3, 10, rsiShortOK ? "OK" : "NO", bgcolor=rsiShortOK ? color.new(color.green, 60) : color.new(color.red, 60), text_color=color.white, text_size=size.small)
+    // 
+    // // Fila 11: Filtro HTF
+    // table.cell(diagTable, 0, 11, "11. Filtro HTF", text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 1, 11, "EMA: " + str.tostring(htfEMA, "#.##"), text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 2, 11, htfLongOK ? "OK" : "NO", bgcolor=htfLongOK ? color.new(color.green, 60) : color.new(color.red, 60), text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 3, 11, htfShortOK ? "OK" : "NO", bgcolor=htfShortOK ? color.new(color.green, 60) : color.new(color.red, 60), text_color=color.white, text_size=size.small)
+    // 
+    // // Fila 12: Pendiente Azul (Trend EMA Slope)
+    // table.cell(diagTable, 0, 12, "12. Pendiente Azul", text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 1, 12, str.tostring(emaTendencia - emaTendencia[1], "#.####"), text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 2, 12, pendienteLong ? "OK" : "NO", bgcolor=pendienteLong ? color.new(color.green, 60) : color.new(color.red, 60), text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 3, 12, pendienteShort ? "OK" : "NO", bgcolor=pendienteShort ? color.new(color.green, 60) : color.new(color.red, 60), text_color=color.white, text_size=size.small)
+    // 
+    // // Fila 13: EMAs Convergentes
+    // table.cell(diagTable, 0, 13, "13. Convergencia", text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 1, 13, convergen ? "SI (Compresión)" : "NO", text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 2, 13, rupturaLong ? "RUPTURA OK" : "Buscando", bgcolor=rupturaLong ? color.new(color.green, 60) : color.new(color.navy, 60), text_color=color.white, text_size=size.small)
+    // table.cell(diagTable, 3, 13, rupturaShort ? "RUPTURA OK" : "Buscando", bgcolor=rupturaShort ? color.new(color.green, 60) : color.new(color.navy, 60), text_color=color.white, text_size=size.small)
 
 

@@ -31,6 +31,12 @@ input double InpFixedLotVal = 0.01; // Valor de Lote Fijo(Lotes MT5)
 input double InpMaxRiskPerc = 5.0; // Riesgo Máximo Permitido por Trade( % )
 input double InpMaxSpreadPoints = 50.0; // Spread Máximo Permitido(Puntos)
 input double InpMinStopsLevel = 0.0; // Mínimo Stop Level(Puntos)
+input bool InpUseChopFilter = true; // Evitar mercado lateral
+input double InpMinEmaSlopeAtr = 0.08; // Pendiente minima EMA rapida (x ATR)
+input double InpMinChopAdx = 20.0; // ADX minimo anti-lateral
+input double InpDailyLossLimitPerc = 3.0; // Perdida diaria maxima (% balance)
+input int InpMaxConsecutiveLosses = 2; // Pausa tras perdidas consecutivas
+input int InpMaxTradesPerDay = 6; // Maximo de entradas por dia
 input ulong MagicNumber = 654321; // Magic Number de la Estrategia
 
 input group "--- FILTROS MANUALES(Solo si Perfil = Manual) ---"
@@ -95,6 +101,12 @@ double fixedLotValue;
 double maxRiskPerc;
 double maxSpreadPoints;
 double minStopsLevel;
+bool useChopFilter;
+double minEmaSlopeAtr;
+double minChopAdx;
+double dailyLossLimitPerc;
+int maxConsecutiveLosses;
+int maxTradesPerDay;
 
 // Parámetros de Indicadores reasignables
 string emaTF;
@@ -128,8 +140,10 @@ int htfEmaHandle = INVALID_HANDLE;
 double activeSL = 0.0;
 double activeTP = 0.0;
 double initialSL = 0.0;
+double initialTP = 0.0;
 double trailStep = 0.0;
 double entryP = 0.0;
+datetime entryT = 0;
 bool tpChaseTriggered = false;
 double tpChaseSlGap = 0.0;
 bool beTriggered = false;
@@ -163,6 +177,12 @@ int OnInit()
     useTP = InpUseTP;
     trailDivisions = InpTrailDivisions;
     if(trailDivisions < 1) trailDivisions = 1;
+    useChopFilter = InpUseChopFilter;
+    minEmaSlopeAtr = InpMinEmaSlopeAtr;
+    minChopAdx = InpMinChopAdx;
+    dailyLossLimitPerc = InpDailyLossLimitPerc;
+    maxConsecutiveLosses = InpMaxConsecutiveLosses;
+    maxTradesPerDay = InpMaxTradesPerDay;
    
    // Cargar Parámetros según Perfil de Símbolo
     if(autoProfile && isGold)
@@ -542,6 +562,141 @@ double GetIndicatorValue(int handle, int bufferNum, int index)
 }
 
 //+------------------------------------------------------------------+
+//| Inicio del dia del servidor                                      |
+//+------------------------------------------------------------------+
+datetime GetBrokerDayStart()
+{
+    MqlDateTime dt;
+    TimeToStruct(TimeCurrent(), dt);
+    dt.hour = 0;
+    dt.min = 0;
+    dt.sec = 0;
+    return(StructToTime(dt));
+}
+
+//+------------------------------------------------------------------+
+//| PnL cerrado del dia para este simbolo y magic                    |
+//+------------------------------------------------------------------+
+double GetTodayClosedPnl()
+{
+    datetime dayStart = GetBrokerDayStart();
+    if(!HistorySelect(dayStart, TimeCurrent())) return(0.0);
+
+    double pnl = 0.0;
+    int total = HistoryDealsTotal();
+    for(int i = 0; i < total; i++)
+    {
+        ulong ticket = HistoryDealGetTicket(i);
+        if(ticket == 0) continue;
+        if(HistoryDealGetString(ticket, DEAL_SYMBOL) != Symbol()) continue;
+        if((ulong)HistoryDealGetInteger(ticket, DEAL_MAGIC) != MagicNumber) continue;
+
+        long entry = HistoryDealGetInteger(ticket, DEAL_ENTRY);
+        if(entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_INOUT) continue;
+
+        pnl += HistoryDealGetDouble(ticket, DEAL_PROFIT);
+        pnl += HistoryDealGetDouble(ticket, DEAL_SWAP);
+        pnl += HistoryDealGetDouble(ticket, DEAL_COMMISSION);
+    }
+    return(pnl);
+}
+
+//+------------------------------------------------------------------+
+//| Entradas abiertas durante el dia                                 |
+//+------------------------------------------------------------------+
+int GetTodayEntryCount()
+{
+    datetime dayStart = GetBrokerDayStart();
+    if(!HistorySelect(dayStart, TimeCurrent())) return(0);
+
+    int count = 0;
+    int total = HistoryDealsTotal();
+    for(int i = 0; i < total; i++)
+    {
+        ulong ticket = HistoryDealGetTicket(i);
+        if(ticket == 0) continue;
+        if(HistoryDealGetString(ticket, DEAL_SYMBOL) != Symbol()) continue;
+        if((ulong)HistoryDealGetInteger(ticket, DEAL_MAGIC) != MagicNumber) continue;
+
+        long entry = HistoryDealGetInteger(ticket, DEAL_ENTRY);
+        if(entry == DEAL_ENTRY_IN || entry == DEAL_ENTRY_INOUT) count++;
+    }
+    return(count);
+}
+
+//+------------------------------------------------------------------+
+//| Perdidas cerradas consecutivas recientes                         |
+//+------------------------------------------------------------------+
+int GetConsecutiveLosses()
+{
+    datetime fromTime = TimeCurrent() - 30 * 86400;
+    if(!HistorySelect(fromTime, TimeCurrent())) return(0);
+
+    int losses = 0;
+    int total = HistoryDealsTotal();
+    for(int i = total - 1; i >= 0; i--)
+    {
+        ulong ticket = HistoryDealGetTicket(i);
+        if(ticket == 0) continue;
+        if(HistoryDealGetString(ticket, DEAL_SYMBOL) != Symbol()) continue;
+        if((ulong)HistoryDealGetInteger(ticket, DEAL_MAGIC) != MagicNumber) continue;
+
+        long entry = HistoryDealGetInteger(ticket, DEAL_ENTRY);
+        if(entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_INOUT) continue;
+
+        double pnl = HistoryDealGetDouble(ticket, DEAL_PROFIT)
+                   + HistoryDealGetDouble(ticket, DEAL_SWAP)
+                   + HistoryDealGetDouble(ticket, DEAL_COMMISSION);
+        if(pnl < 0.0)
+        {
+            losses++;
+            continue;
+        }
+        if(pnl > 0.0) break;
+    }
+    return(losses);
+}
+
+//+------------------------------------------------------------------+
+//| Bloqueo de entradas por control de riesgo                        |
+//+------------------------------------------------------------------+
+bool IsRiskBlocked()
+{
+    if(dailyLossLimitPerc > 0.0)
+    {
+        double maxDailyLoss = AccountInfoDouble(ACCOUNT_BALANCE) * (dailyLossLimitPerc / 100.0);
+        double todayPnl = GetTodayClosedPnl();
+        if(todayPnl <= -maxDailyLoss)
+        {
+            Print("Entrada bloqueada: perdida diaria alcanzada. PnL=", todayPnl, " Limite=", -maxDailyLoss);
+            return(true);
+        }
+    }
+
+    if(maxConsecutiveLosses > 0)
+    {
+        int losses = GetConsecutiveLosses();
+        if(losses >= maxConsecutiveLosses)
+        {
+            Print("Entrada bloqueada: perdidas consecutivas=", losses);
+            return(true);
+        }
+    }
+
+    if(maxTradesPerDay > 0)
+    {
+        int tradesToday = GetTodayEntryCount();
+        if(tradesToday >= maxTradesPerDay)
+        {
+            Print("Entrada bloqueada: maximo de entradas diarias=", tradesToday);
+            return(true);
+        }
+    }
+
+    return(false);
+}
+
+//+------------------------------------------------------------------+
 //| Helper para calcular RMA                                         |
 //+------------------------------------------------------------------+
 double CalculateRMA(const double &price[], int size, int len, int targetIndex)
@@ -665,6 +820,7 @@ void DrawInitBoxes(datetime entryTime, double entryPrice, double slVal, double t
 {
     ObjectDelete(0, "SL_Box");
     ObjectDelete(0, "TP_Box");
+    entryT = entryTime;
    
     datetime endTime = entryTime + PeriodSeconds(PERIOD_CURRENT) * 20; // Duración visible de 20 velas
    
@@ -681,6 +837,58 @@ void DrawInitBoxes(datetime entryTime, double entryPrice, double slVal, double t
     ObjectSetInteger(0, "TP_Box", OBJPROP_FILL, true);
     ObjectSetInteger(0, "TP_Box", OBJPROP_BACK, true);
     ObjectSetInteger(0, "TP_Box", OBJPROP_SELECTABLE, false);
+}
+
+//+------------------------------------------------------------------+
+//| Actualizar cajas de SL y TP                                      |
+//+------------------------------------------------------------------+
+void UpdateTradeBoxes(double entryPrice, double slVal, double tpVal)
+{
+    datetime boxStart = entryT;
+    if(boxStart == 0)
+    {
+        boxStart = (datetime)ObjectGetInteger(0, "SL_Box", OBJPROP_TIME, 0);
+        if(boxStart == 0) boxStart = TimeCurrent();
+    }
+
+    datetime boxEnd = TimeCurrent() + PeriodSeconds(PERIOD_CURRENT) * 20;
+
+    if(ObjectFind(0, "SL_Box") >= 0)
+    {
+        ObjectMove(0, "SL_Box", 0, boxStart, entryPrice);
+        ObjectMove(0, "SL_Box", 1, boxEnd, slVal);
+    }
+    else
+    {
+        ObjectCreate(0, "SL_Box", OBJ_RECTANGLE, 0, boxStart, entryPrice, boxEnd, slVal);
+        ObjectSetInteger(0, "SL_Box", OBJPROP_COLOR, C'255, 220, 220');
+        ObjectSetInteger(0, "SL_Box", OBJPROP_FILL, true);
+        ObjectSetInteger(0, "SL_Box", OBJPROP_BACK, true);
+        ObjectSetInteger(0, "SL_Box", OBJPROP_SELECTABLE, false);
+    }
+
+    if(tpVal > 0.0)
+    {
+        if(ObjectFind(0, "TP_Box") >= 0)
+        {
+            ObjectMove(0, "TP_Box", 0, boxStart, entryPrice);
+            ObjectMove(0, "TP_Box", 1, boxEnd, tpVal);
+        }
+        else
+        {
+            ObjectCreate(0, "TP_Box", OBJ_RECTANGLE, 0, boxStart, entryPrice, boxEnd, tpVal);
+            ObjectSetInteger(0, "TP_Box", OBJPROP_COLOR, C'220, 255, 220');
+            ObjectSetInteger(0, "TP_Box", OBJPROP_FILL, true);
+            ObjectSetInteger(0, "TP_Box", OBJPROP_BACK, true);
+            ObjectSetInteger(0, "TP_Box", OBJPROP_SELECTABLE, false);
+        }
+    }
+    else
+    {
+        ObjectDelete(0, "TP_Box");
+    }
+
+    ChartRedraw(0);
 }
 
 //+------------------------------------------------------------------+
@@ -716,6 +924,7 @@ void OnTick()
                         if(newTP > currentTP && trade.PositionModify(Symbol(), currentSL, newTP))
                         {
                             activeTP = newTP;
+                            UpdateTradeBoxes(positionEntry, currentSL, newTP);
                             if(!tpChaseTriggered)
                             {
                                 double halfTpSL = positionEntry + (MathAbs(newTP - positionEntry) / 2.0);
@@ -725,9 +934,16 @@ void OnTick()
                                 {
                                     activeSL = newSL;
                                     currentSL = newSL;
+                                    UpdateTradeBoxes(positionEntry, newSL, newTP);
+                                    tpChaseSlGap = MathMax(highCurr - newSL, point);
+                                    tpChaseTriggered = true;
                                 }
-                                tpChaseSlGap = MathMax(highCurr - newSL, point);
-                                tpChaseTriggered = true;
+                                else if(currentSL >= newSL)
+                                {
+                                    activeSL = currentSL;
+                                    tpChaseSlGap = MathMax(highCurr - currentSL, point);
+                                    tpChaseTriggered = true;
+                                }
                             }
                         }
                     }
@@ -737,6 +953,7 @@ void OnTick()
                         if(trailingSL > currentSL && trade.PositionModify(Symbol(), trailingSL, activeTP))
                         {
                             activeSL = trailingSL;
+                            UpdateTradeBoxes(positionEntry, trailingSL, activeTP);
                         }
                     }
                 }
@@ -749,6 +966,7 @@ void OnTick()
                         if(newTP < currentTP && trade.PositionModify(Symbol(), currentSL, newTP))
                         {
                             activeTP = newTP;
+                            UpdateTradeBoxes(positionEntry, currentSL, newTP);
                             if(!tpChaseTriggered)
                             {
                                 double halfTpSL = positionEntry - (MathAbs(newTP - positionEntry) / 2.0);
@@ -758,9 +976,16 @@ void OnTick()
                                 {
                                     activeSL = newSL;
                                     currentSL = newSL;
+                                    UpdateTradeBoxes(positionEntry, newSL, newTP);
+                                    tpChaseSlGap = MathMax(newSL - lowCurr, point);
+                                    tpChaseTriggered = true;
                                 }
-                                tpChaseSlGap = MathMax(newSL - lowCurr, point);
-                                tpChaseTriggered = true;
+                                else if(currentSL > 0.0 && currentSL <= newSL)
+                                {
+                                    activeSL = currentSL;
+                                    tpChaseSlGap = MathMax(currentSL - lowCurr, point);
+                                    tpChaseTriggered = true;
+                                }
                             }
                         }
                     }
@@ -770,6 +995,7 @@ void OnTick()
                         if((trailingSL < currentSL || currentSL == 0.0) && trade.PositionModify(Symbol(), trailingSL, activeTP))
                         {
                             activeSL = trailingSL;
+                            UpdateTradeBoxes(positionEntry, trailingSL, activeTP);
                         }
                     }
                 }
@@ -809,8 +1035,10 @@ void OnTick()
             activeSL = 0.0;
             activeTP = 0.0;
             initialSL = 0.0;
+            initialTP = 0.0;
             trailStep = 0.0;
             entryP = 0.0;
+            entryT = 0;
             tpChaseTriggered = false;
             tpChaseSlGap = 0.0;
             beTriggered = false;
@@ -828,6 +1056,8 @@ void OnTick()
             activeSL = currentSL;
             activeTP = currentTP;
             initialSL = currentSL;
+            initialTP = currentTP;
+            entryT = (datetime)PositionGetInteger(POSITION_TIME);
             trailStep = 0.0;
             tpChaseTriggered = false;
             tpChaseSlGap = 0.0;
@@ -854,27 +1084,32 @@ void OnTick()
         }
       
       // --- BREAK-EVEN ---
-        if(useBE && !beTriggered && !tpChaseTriggered)
+        if(!beTriggered && !tpChaseTriggered)
         {
-            double distInicial = MathAbs(entryP - initialSL);
             if(inLong)
             {
-                double recorrido = bid - entryP;
-                if(recorrido >= (distInicial * beRatio))
+                double halfInitialTP = entryP + (MathAbs(initialTP - entryP) / 2.0);
+                if(initialTP > entryP && bid >= halfInitialTP)
                 {
                     activeSL = entryP;
                     beTriggered = true;
-                    trade.PositionModify(Symbol(), activeSL, activeTP);
+                    if(trade.PositionModify(Symbol(), activeSL, activeTP))
+                    {
+                        UpdateTradeBoxes(entryP, activeSL, activeTP);
+                    }
                 }
             }
             else if(inShort)
             {
-                double recorrido = entryP - ask;
-                if(recorrido >= (distInicial * beRatio))
+                double halfInitialTP = entryP - (MathAbs(initialTP - entryP) / 2.0);
+                if(initialTP > 0.0 && initialTP < entryP && ask <= halfInitialTP)
                 {
                     activeSL = entryP;
                     beTriggered = true;
-                    trade.PositionModify(Symbol(), activeSL, activeTP);
+                    if(trade.PositionModify(Symbol(), activeSL, activeTP))
+                    {
+                        UpdateTradeBoxes(entryP, activeSL, activeTP);
+                    }
                 }
             }
         }
@@ -888,7 +1123,10 @@ void OnTick()
                 if(trailingSL > activeSL)
                 {
                     activeSL = trailingSL;
-                    trade.PositionModify(Symbol(), activeSL, activeTP);
+                    if(trade.PositionModify(Symbol(), activeSL, activeTP))
+                    {
+                        UpdateTradeBoxes(entryP, activeSL, activeTP);
+                    }
                 }
             }
             else if(inShort)
@@ -897,7 +1135,10 @@ void OnTick()
                 if(trailingSL < activeSL || activeSL == 0.0)
                 {
                     activeSL = trailingSL;
-                    trade.PositionModify(Symbol(), activeSL, activeTP);
+                    if(trade.PositionModify(Symbol(), activeSL, activeTP))
+                    {
+                        UpdateTradeBoxes(entryP, activeSL, activeTP);
+                    }
                 }
             }
         }
@@ -911,10 +1152,14 @@ void OnTick()
             {
                 if(niveles > trailDivisions) niveles = trailDivisions;
                 double nuevoSL = initialSL + (trailStep * niveles);
+                if(beTriggered && nuevoSL > entryP) nuevoSL = entryP;
                 if(nuevoSL > activeSL)
                 {
                     activeSL = nuevoSL;
-                    trade.PositionModify(Symbol(), activeSL, activeTP);
+                    if(trade.PositionModify(Symbol(), activeSL, activeTP))
+                    {
+                        UpdateTradeBoxes(entryP, activeSL, activeTP);
+                    }
                 }
             }
         }
@@ -926,10 +1171,14 @@ void OnTick()
             {
                 if(niveles > trailDivisions) niveles = trailDivisions;
                 double nuevoSL = initialSL - (trailStep * niveles);
+                if(beTriggered && nuevoSL < entryP) nuevoSL = entryP;
                 if(nuevoSL < activeSL || activeSL == 0.0)
                 {
                     activeSL = nuevoSL;
-                    trade.PositionModify(Symbol(), activeSL, activeTP);
+                    if(trade.PositionModify(Symbol(), activeSL, activeTP))
+                    {
+                        UpdateTradeBoxes(entryP, activeSL, activeTP);
+                    }
                 }
             }
         }
@@ -1136,4 +1385,3 @@ void OnTick()
     }
 }
 //+------------------------------------------------------------------------+
-------+
