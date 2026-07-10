@@ -50,25 +50,25 @@ inpSwingPeriod = input.int(8,   "Velas Swing High/Low manual", minval=2, group=g
 inpSlBufPts   = input.float(2.0, "Buffer SL manual (Ticks/Puntos)", minval=0.0, group=gpParam)
 inpUseIMACD    = input.bool(false, "Usar iMACD manual", group=gpParam)
 inpImacdLen    = input.int(35,     "Período iMACD manual", minval=1, group=gpParam)
-inpUseEMASpread  = input.bool(true,  "Usar Abertura EMAs manual", group=gpParam)
-inpEmaSpreadMult = input.float(0.4,  "Abertura Mínima EMAs manual (× ATR)", minval=0.0, step=0.1, group=gpParam)
-inpUseHAStrength = input.bool(false, "Fuerza Heikin-Ashi manual", group=gpParam)
-inpUseATRMin   = input.bool(false, "Filtro ATR Mínimo manual", group=gpParam)
+// inpUseEMASpread  = input.bool(true,  "Usar Abertura EMAs manual", group=gpParam)
+// inpEmaSpreadMult = input.float(0.4,  "Abertura Mínima EMAs manual (× ATR)", minval=0.0, step=0.1, group=gpParam)
+// inpUseHAStrength = input.bool(false, "Fuerza Heikin-Ashi manual", group=gpParam)
+// inpUseATRMin   = input.bool(false, "Filtro ATR Mínimo manual", group=gpParam)
 inpAtrFilterLen = input.int(14,    "Período ATR manual", minval=1, group=gpParam)
-inpAtrMinUSD   = input.float(2.0,  "ATR Mínimo USD manual", minval=0.1, step=0.1, group=gpParam)
-inpUseADX       = input.bool(false, "Filtro ADX manual", group=gpParam)
-inpAdxLen       = input.int(14,     "Período ADX manual", minval=1, group=gpParam)
-inpAdxMin       = input.float(22.0, "ADX Mínimo manual", minval=5.0, step=1.0, group=gpParam)
-inpMaxOverextensionMult = input.float(0.0, "Multiplicador de sobreextensión (0 = Desactivado)", minval=0.0, group=gpParam)
+// inpAtrMinUSD   = input.float(2.0,  "ATR Mínimo USD manual", minval=0.1, step=0.1, group=gpParam)
+// inpUseADX       = input.bool(false, "Filtro ADX manual", group=gpParam)
+// inpAdxLen       = input.int(14,     "Período ADX manual", minval=1, group=gpParam)
+// inpAdxMin       = input.float(22.0, "ADX Mínimo manual", minval=5.0, step=1.0, group=gpParam)
+// inpMaxOverextensionMult = input.float(0.0, "Multiplicador de sobreextensión (0 = Desactivado)", minval=0.0, group=gpParam)
 inpBodyMinMult = input.float(0.75, "Multiplicador de Cuerpo Mínimo manual (× ATR)", minval=0.0, step=0.05, group=gpParam)
 
 // ════════════════════════════════════════════════════════════════════
 // 4. CONTROL DE SESIÓN
 // ════════════════════════════════════════════════════════════════════
-gpSes          = "--- CONTROL DE SESIÓN ---"
-inpUseSession   = input.bool(false, "Usar Sesión Horaria", group=gpSes)
-inpSessionStr   = input.session("0800-1700", "Horario Operativo (UTC)", group=gpSes)
-inpTimezone     = input.string("America/New_York", "Zona Horaria de la Sesión", options=["America/New_York", "America/Mexico_City", "UTC"], group=gpSes)
+// gpSes          = "--- CONTROL DE SESIÓN ---"
+// inpUseSession   = input.bool(false, "Usar Sesión Horaria", group=gpSes)
+// inpSessionStr   = input.session("0800-1700", "Horario Operativo (UTC)", group=gpSes)
+// inpTimezone     = input.string("America/New_York", "Zona Horaria de la Sesión", options=["America/New_York", "America/Mexico_City", "UTC"], group=gpSes)
 
 // ════════════════════════════════════════════════════════════════════
 // 5. VARIABLES GLOBALES (Reglas del Proyecto)
@@ -140,20 +140,20 @@ adxLen := inpAdxLen
 slBufferPts := inpSlBufPts
 rrRatio := inpRrRatio
 useIMACD := inpUseIMACD
-useEMASpread := inpUseEMASpread
-emaSpreadMult := inpEmaSpreadMult
-useHAStrength := inpUseHAStrength
-useHAStrength := inpUseHAStrength
-useATRMin := inpUseATRMin
-atrMinUSD := inpAtrMinUSD
-useADX := inpUseADX
-adxMin := inpAdxMin
+// useEMASpread := inpUseEMASpread
+// emaSpreadMult := inpEmaSpreadMult
+// useHAStrength := inpUseHAStrength
+// useHAStrength := inpUseHAStrength
+// useATRMin := inpUseATRMin
+// atrMinUSD := inpAtrMinUSD
+// useADX := inpUseADX
+// adxMin := inpAdxMin
 useTPChase := inpUseTPChase
 useTP := inpUseTP
 tpChasePts := inpTpChasePts
 tpChaseOffset := inpTpChaseOffset
 trailDivisions := inpTrailDivisions
-maxOverextensionMult := inpMaxOverextensionMult
+// maxOverextensionMult := inpMaxOverextensionMult
 bodyMinMult := inpBodyMinMult
 useBE := inpUseBE
 useFixedLot := inpUseFixedLot
@@ -162,9 +162,9 @@ maxRiskPerc := inpMaxRiskPerc
 maxSpreadPoints := inpMaxSpreadPoints
 minStopsLevel := inpMinStopsLevel
 signalValidBars := inpSignalValidBars
-useSession := inpUseSession
-sessionStr := inpSessionStr
-timezoneVal := inpTimezone
+// useSession := inpUseSession
+// sessionStr := inpSessionStr
+// timezoneVal := inpTimezone
 
 // Sobreescritura de parámetros si el perfil es automático y coincide con los símbolos
 if isGold

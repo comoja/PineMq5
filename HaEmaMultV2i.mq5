@@ -41,22 +41,22 @@ input int InpSwingPeriod = 8; // Velas Swing High/Low manual
 input double InpSlBufPts = 2.0; // Buffer SL manual (Puntos)
 input bool InpUseIMACD = false; // Usar iMACD manual
 input int InpImacdLen = 35; // Período iMACD manual
-input bool InpUseEMASpread = true; // Usar Abertura EMAs manual
-input double InpEmaSpreadMult = 0.4; // Abertura Mínima EMAs manual (x ATR)
-input bool InpUseHAStrength = false; // Fuerza Heikin-Ashi manual
-input bool InpUseATRMin = false; // Filtro ATR Mínimo manual
+// input bool InpUseEMASpread = true; // Usar Abertura EMAs manual
+// input double InpEmaSpreadMult = 0.4; // Abertura Mínima EMAs manual (x ATR)
+// input bool InpUseHAStrength = false; // Fuerza Heikin-Ashi manual
+// input bool InpUseATRMin = false; // Filtro ATR Mínimo manual
 input int InpAtrFilterLen = 14; // Período ATR manual
-input double InpAtrMinUSD = 2.0; // ATR Mínimo USD manual
-input bool InpUseADX = false; // Filtro ADX manual
-input int InpAdxLen = 14; // Período ADX manual
-input double InpAdxMin = 22.0; // ADX Mínimo manual
-input double InpMaxOverextensionMult = 0.0; // Multiplicador de sobreextensión (0 = Desactivado)
+// input double InpAtrMinUSD = 2.0; // ATR Mínimo USD manual
+// input bool InpUseADX = false; // Filtro ADX manual
+// input int InpAdxLen = 14; // Período ADX manual
+// input double InpAdxMin = 22.0; // ADX Mínimo manual
+// input double InpMaxOverextensionMult = 0.0; // Multiplicador de sobreextensión (0 = Desactivado)
 input double InpBodyMinMult = 0.75; // Multiplicador de Cuerpo Mínimo manual (x ATR)
 
 input group "--- CONTROL DE SESIÓN ---"
-input bool InpUseSession = false; // Usar Sesión Horaria
-input string InpSessionStr = "0800-1700"; // Horario Operativo (UTC)
-input string InpTimezone = "America/New_York"; // Zona Horaria de la Sesión
+// input bool InpUseSession = false; // Usar Sesión Horaria
+// input string InpSessionStr = "0800-1700"; // Horario Operativo (UTC)
+// input string InpTimezone = "America/New_York"; // Zona Horaria de la Sesión
 
 // ============================================================================
 // VARIABLES GLOBALES
@@ -187,19 +187,18 @@ int OnInit()
     
     slBufferPts = InpSlBufPts;
     rrRatio = InpRrRatio;
-    useIMACD = InpUseIMACD;
-    useEMASpread = InpUseEMASpread;
-    emaSpreadMult = InpEmaSpreadMult;
-    useHAStrength = InpUseHAStrength;
-    useATRMin = InpUseATRMin;
-    atrMinUSD = InpAtrMinUSD;
-    useADX = InpUseADX;
-    adxMin = InpAdxMin;
+    // useEMASpread = InpUseEMASpread;
+    // emaSpreadMult = InpEmaSpreadMult;
+    // useHAStrength = InpUseHAStrength;
+    // useATRMin = InpUseATRMin;
+    // atrMinUSD = InpAtrMinUSD;
+    // useADX = InpUseADX;
+    // adxMin = InpAdxMin;
     useTPChase = InpUseTPChase;
     tpChasePts = InpTpChasePts;
     tpChaseOffset = InpTpChaseOffset;
     trailDivisions = InpTrailDivisions;
-    maxOverextensionMult = InpMaxOverextensionMult;
+    // maxOverextensionMult = InpMaxOverextensionMult;
     bodyMinMult = InpBodyMinMult;
     useBE = InpUseBE;
     useFixedLot = InpUseFixedLot;
@@ -207,9 +206,9 @@ int OnInit()
     maxRiskPerc = InpMaxRiskPerc;
     maxSpreadPoints = InpMaxSpreadPoints;
     minStopsLevel = InpMinStopsLevel;
-    useSession = InpUseSession;
-    sessionStr = InpSessionStr;
-    timezoneVal = InpTimezone;
+    // useSession = InpUseSession;
+    // sessionStr = InpSessionStr;
+    // timezoneVal = InpTimezone;
     signalValidBars = InpSignalValidBars;
     
     if(autoProfile && isGold)
