@@ -29,7 +29,6 @@ input double InpFixedLotVal = 0.01; // Valor de Lote Fijo (Lotes MT5)
 input double InpMaxRiskPerc = 5.0; // Riesgo Máximo Permitido por Trade (% Balance)
 input double InpMaxSpreadPoints = 50.0; // Spread Máximo Permitido (Puntos)
 input double InpMinStopsLevel = 0.0; // Mínimo Stop Level (Puntos)
-input int InpSignalValidBars = 5; // Velas de validez de la señal (espera de cierre de posición)
 input bool InpUseBE = true; // Usar Break-Even (BE)
 input ulong MagicNumber = 789101; // Magic Number de la Estrategia
 
@@ -41,22 +40,8 @@ input int InpSwingPeriod = 8; // Velas Swing High/Low manual
 input double InpSlBufPts = 2.0; // Buffer SL manual (Puntos)
 input bool InpUseIMACD = false; // Usar iMACD manual
 input int InpImacdLen = 35; // Período iMACD manual
-// input bool InpUseEMASpread = true; // Usar Abertura EMAs manual
-// input double InpEmaSpreadMult = 0.4; // Abertura Mínima EMAs manual (x ATR)
-// input bool InpUseHAStrength = false; // Fuerza Heikin-Ashi manual
-// input bool InpUseATRMin = false; // Filtro ATR Mínimo manual
 input int InpAtrFilterLen = 14; // Período ATR manual
-// input double InpAtrMinUSD = 2.0; // ATR Mínimo USD manual
-// input bool InpUseADX = false; // Filtro ADX manual
-// input int InpAdxLen = 14; // Período ADX manual
-// input double InpAdxMin = 22.0; // ADX Mínimo manual
-// input double InpMaxOverextensionMult = 0.0; // Multiplicador de sobreextensión (0 = Desactivado)
 input double InpBodyMinMult = 0.75; // Multiplicador de Cuerpo Mínimo manual (x ATR)
-
-input group "--- CONTROL DE SESIÓN ---"
-// input bool InpUseSession = false; // Usar Sesión Horaria
-// input string InpSessionStr = "0800-1700"; // Horario Operativo (UTC)
-// input string InpTimezone = "America/New_York"; // Zona Horaria de la Sesión
 
 // ============================================================================
 // VARIABLES GLOBALES
@@ -64,31 +49,18 @@ input group "--- CONTROL DE SESIÓN ---"
 double slBufferPts;
 double rrRatio;
 bool useIMACD;
-bool useEMASpread;
-double emaSpreadMult;
-bool useHAStrength;
-bool useATRMin;
-double atrMinUSD;
-bool useADX;
-double adxMin;
-bool useADX;
 bool useTPChase;
 bool useTP;
 double tpChasePts;
 double tpChaseOffset;
 int trailDivisions;
-double maxOverextensionMult;
 double bodyMinMult;
 bool useFixedLot;
 double fixedLotValue;
 double maxRiskPerc;
 double maxSpreadPoints;
 double minStopsLevel;
-int signalValidBars;
 bool useBE;
-bool useSession;
-string sessionStr;
-string timezoneVal;
 
 // Parámetros de Indicadores reasignables
 string emaTF;
@@ -96,7 +68,7 @@ int fastLen;
 int slowLen;
 int swingPeriod;
 int imacdLen;
-int adxLen;
+int atrFilterLen;
 
 // Banderas de Activo
 bool isGold = false;
@@ -142,12 +114,8 @@ struct HeikinAshiBar {
     double close;
 };
 
-// Modos de zona horaria: 0 = NY, 1 = CDMX, 2 = UTC
-int timezoneMode = 0;
-
 // Declaraciones de funciones
 double CalculateATR(int index, int period);
-double CalculateADX(int index, int period);
 double GetIMACD(int targetIndex, int len);
 bool GetHeikinAshi(HeikinAshiBar &haBars[]);
 void ManageActivePosition();
@@ -185,22 +153,13 @@ int OnInit()
     slowLen = InpEmaSlowLen;
     swingPeriod = InpSwingPeriod;
     imacdLen = InpImacdLen;
-    adxLen = 14;
     
     slBufferPts = InpSlBufPts;
     rrRatio = InpRrRatio;
-    // useEMASpread = InpUseEMASpread;
-    // emaSpreadMult = InpEmaSpreadMult;
-    // useHAStrength = InpUseHAStrength;
-    // useATRMin = InpUseATRMin;
-    // atrMinUSD = InpAtrMinUSD;
-    // useADX = InpUseADX;
-    // adxMin = InpAdxMin;
     useTPChase = InpUseTPChase;
     tpChasePts = InpTpChasePts;
     tpChaseOffset = InpTpChaseOffset;
     trailDivisions = InpTrailDivisions;
-    // maxOverextensionMult = InpMaxOverextensionMult;
     bodyMinMult = InpBodyMinMult;
     useBE = InpUseBE;
     useFixedLot = InpUseFixedLot;
@@ -208,10 +167,6 @@ int OnInit()
     maxRiskPerc = InpMaxRiskPerc;
     maxSpreadPoints = InpMaxSpreadPoints;
     minStopsLevel = InpMinStopsLevel;
-    // useSession = InpUseSession;
-    // sessionStr = InpSessionStr;
-    // timezoneVal = InpTimezone;
-    signalValidBars = InpSignalValidBars;
     
     if(autoProfile && isGold)
     {
@@ -220,27 +175,15 @@ int OnInit()
         swingPeriod   = 7;
         imacdLen      = 20;
         atrFilterLen  = 14;
-        adxLen        = 14;
         slBufferPts   = 0.0;
         rrRatio       = 1.8;
         useIMACD      = true;
-        useEMASpread  = true;
-        emaSpreadMult = 0.09;
-        useHAStrength = false;
-        useATRMin     = false;
-        atrMinUSD     = 0.4;
-        useADX        = true;
-        adxMin        = 18.0;
         useTPChase    = true;
         tpChasePts    = 12.0;
         tpChaseOffset = 0.75;
-        useSession    = false;
-        sessionStr    = "0300-1700";
-        timezoneVal   = "UTC";
         maxRiskPerc   = 1.0;
         trailDivisions = 4;
         maxSpreadPoints = 300.0;
-        maxOverextensionMult = 0.0;
         bodyMinMult   = 0.25;
         useBE = false;
     }
@@ -251,14 +194,11 @@ int OnInit()
         swingPeriod   = 5;
         imacdLen      = 35;
         atrFilterLen  = 14;
-        adxLen        = 14;
         useTPChase    = true;
         tpChasePts    = 2.0;
         tpChaseOffset = 0.25;
-        useSession    = false;
         trailDivisions = 5;
         maxSpreadPoints = 100.0;
-        maxOverextensionMult = 0.0;
         bodyMinMult   = 0.75;
         useBE = false;
     }
@@ -269,14 +209,11 @@ int OnInit()
         swingPeriod   = 5;
         imacdLen      = 35;
         atrFilterLen  = 14;
-        adxLen        = 14;
         useTPChase    = true;
         tpChasePts    = 150.0;
         tpChaseOffset = 150.0;
-        useSession    = false;
         trailDivisions = 7;
         maxSpreadPoints = 10000.0;
-        maxOverextensionMult = 0.0;
         bodyMinMult   = 0.75;
         useBE = false;
     }
@@ -287,25 +224,16 @@ int OnInit()
         swingPeriod   = 5;
         imacdLen      = 35;
         atrFilterLen  = 14;
-        adxLen        = 14;
         useTPChase    = true;
         tpChasePts    = 15.0;
         tpChaseOffset = 15.0;
-        useSession    = false;
         trailDivisions = 7;
         maxSpreadPoints = 300.0;
-        maxOverextensionMult = 0.0;
         bodyMinMult   = 0.75;
         useBE = false;
     }
     
-    // Impedir lote fijo o configuraciones indebidas en modo automático
-        minStopsLevel = 0.0;
-    
-    // Determinar Zona Horaria numérica
-    if (timezoneVal == "America/New_York") timezoneMode = 0;
-    else if (timezoneVal == "America/Mexico_City") timezoneMode = 1;
-    else timezoneMode = 2; // UTC
+    minStopsLevel = 0.0;
     
     // Validación de temporalidades requeridas para los activos automáticos
     ENUM_TIMEFRAMES correctPeriod = _Period;
@@ -361,106 +289,7 @@ void OnDeinit(const int reason)
     ClearDashboard();
 }
 
-//+------------------------------------------------------------------+
-//| Helper para obtener el offset de Nueva York                      |
-//+------------------------------------------------------------------+
-int GetNewYorkGmtOffset(datetime time)
-{
-    MqlDateTime dt;
-    TimeToStruct(time, dt);
-    
-    if(dt.mon < 3 || dt.mon > 11) return(-5);
-    if(dt.mon > 3 && dt.mon < 11) return(-4);
-    
-    if(dt.mon == 3)
-    {
-        MqlDateTime march1st = dt;
-        march1st.day = 1; march1st.hour = 0; march1st.min = 0; march1st.sec = 0;
-        datetime m1Time = StructToTime(march1st);
-        MqlDateTime m1Parsed;
-        TimeToStruct(m1Time, m1Parsed);
-        int firstSundayDay = 1 + (7 - m1Parsed.day_of_week) % 7;
-        int secondSundayDay = firstSundayDay + 7;
-        if(dt.day > secondSundayDay || (dt.day == secondSundayDay && dt.hour >= 2)) return(-4);
-        return(-5);
-    }
-    
-    if(dt.mon == 11)
-    {
-        MqlDateTime nov1st = dt;
-        nov1st.day = 1; nov1st.hour = 0; nov1st.min = 0; nov1st.sec = 0;
-        datetime n1Time = StructToTime(nov1st);
-        MqlDateTime n1Parsed;
-        TimeToStruct(n1Time, n1Parsed);
-        int firstSundayDay = 1 + (7 - n1Parsed.day_of_week) % 7;
-        if(dt.day > firstSundayDay || (dt.day == firstSundayDay && dt.hour >= 2)) return(-5);
-        return(-4);
-    }
-    return(-5);
-}
 
-//+------------------------------------------------------------------+
-//| Helper para estimar el offset GMT del broker estándar en backtest|
-//+------------------------------------------------------------------+
-int GetBrokerGmtOffset(datetime time)
-{
-    MqlDateTime dt;
-    TimeToStruct(time, dt);
-    if(dt.mon < 3 || dt.mon > 10) return(2);
-    if(dt.mon > 3 && dt.mon < 10) return(3);
-    if(dt.mon == 3)
-    {
-        MqlDateTime temp = dt;
-        temp.day = 31; temp.hour = 0; temp.min = 0; temp.sec = 0;
-        datetime tVal = StructToTime(temp);
-        MqlDateTime parsed;
-        TimeToStruct(tVal, parsed);
-        int lastSunday = 31 - parsed.day_of_week;
-        if(dt.day >= lastSunday) return(3);
-        return(2);
-    }
-    if(dt.mon == 10)
-    {
-        MqlDateTime temp = dt;
-        temp.day = 31; temp.hour = 0; temp.min = 0; temp.sec = 0;
-        datetime tVal = StructToTime(temp);
-        MqlDateTime parsed;
-        TimeToStruct(tVal, parsed);
-        int lastSunday = 31 - parsed.day_of_week;
-        if(dt.day >= lastSunday) return(2);
-        return(3);
-    }
-    return(2);
-}
-
-//+------------------------------------------------------------------+
-//| Verificar si la sesión está activa                               |
-//+------------------------------------------------------------------+
-bool IsInSessionUTC(string sessStr, datetime evalTime)
-{
-    if(!useSession || sessStr == "") return(true);
-    if(StringLen(sessStr) < 9) return(true);
-    
-    int startH = (int)StringToInteger(StringSubstr(sessStr, 0, 2));
-    int startM = (int)StringToInteger(StringSubstr(sessStr, 2, 2));
-    int endH = (int)StringToInteger(StringSubstr(sessStr, 5, 2));
-    int endM = (int)StringToInteger(StringSubstr(sessStr, 7, 2));
-    
-    int autoBrokerGmtOffset = MQLInfoInteger(MQL_TESTER) ? GetBrokerGmtOffset(evalTime) : (int)MathRound((double)(evalTime - TimeGMT()) / 3600.0);
-    int targetGmtOffset = timezoneMode == 0 ? GetNewYorkGmtOffset(evalTime) : (timezoneMode == 2 ? 0 : -6);
-    
-    int diffHours = targetGmtOffset - autoBrokerGmtOffset;
-    datetime targetTime = evalTime + diffHours * 3600;
-    
-    MqlDateTime tgt;
-    TimeToStruct(targetTime, tgt);
-    
-    int currMin = tgt.hour * 60 + tgt.min;
-    int startMin = startH * 60 + startM;
-    int endMin = endH * 60 + endM;
-    
-    return startMin < endMin ? (currMin >= startMin && currMin < endMin) : (currMin >= startMin || currMin < endMin);
-}
 
 //+------------------------------------------------------------------+
 //| Helper para obtener el valor de un búfer de indicador            |
@@ -844,7 +673,6 @@ void UpdateDashboard()
         "Estrategia:", "HaEmaMultV2i",
         "Perfil:", "",
         "Estado:", "",
-        "Sesion:", "",
         "ATR:", "",
         "iMACD:", "",
         "Equidad:", "",
@@ -862,7 +690,6 @@ void UpdateDashboard()
     }
     
     bool inTrade = GetOwnPositionType() != -1;
-    bool inSession = IsInSessionUTC(sessionStr, TimeCurrent());
     double atrVal = CalculateATR(1, atrFilterLen);
     
     double md = GetIMACD(1, imacdLen);
@@ -872,18 +699,17 @@ void UpdateDashboard()
     
     labels[3] = profileName;
     labels[5] = inTrade ? "DENTRO" : "BUSCANDO";
-    labels[7] = inSession ? "ACTIVA" : "CERRADA";
-    labels[9] = DoubleToString(atrVal, 2) + " USD";
-    labels[11] = imacdStatus;
-    labels[13] = "$" + DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2);
-    labels[15] = DoubleToString(GetTodayClosedPnl(), 2) + " USD";
+    labels[7] = DoubleToString(atrVal, 2) + " USD";
+    labels[9] = imacdStatus;
+    labels[11] = "$" + DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2);
+    labels[13] = DoubleToString(GetTodayClosedPnl(), 2) + " USD";
     
     int startX = 220;
     int startY = 40;
     int rowHeight = 16;
     int colWidth = 100;
     
-    for(int i = 0; i < 8; i++)
+    for(int i = 0; i < 7; i++)
     {
         string nameKey = prefix + "Key_" + (string)i;
         string nameVal = prefix + "Val_" + (string)i;
@@ -917,11 +743,10 @@ void UpdateDashboard()
         if(i == 0) ObjectSetInteger(0, nameVal, OBJPROP_COLOR, clrYellow);
         if(i == 1) ObjectSetInteger(0, nameVal, OBJPROP_COLOR, clrLightBlue);
         if(i == 2) ObjectSetInteger(0, nameVal, OBJPROP_COLOR, inTrade ? clrGreen : clrOrange);
-        if(i == 3) ObjectSetInteger(0, nameVal, OBJPROP_COLOR, inSession ? clrGreen : clrGray);
-        if(i == 4) ObjectSetInteger(0, nameVal, OBJPROP_COLOR, clrGreen);
-        if(i == 5) ObjectSetInteger(0, nameVal, OBJPROP_COLOR, imacdColor);
-        if(i == 6) ObjectSetInteger(0, nameVal, OBJPROP_COLOR, clrGreen);
-        if(i == 7) ObjectSetInteger(0, nameVal, OBJPROP_COLOR, GetTodayClosedPnl() >= 0 ? clrGreen : clrRed);
+        if(i == 3) ObjectSetInteger(0, nameVal, OBJPROP_COLOR, clrGreen);
+        if(i == 4) ObjectSetInteger(0, nameVal, OBJPROP_COLOR, imacdColor);
+        if(i == 5) ObjectSetInteger(0, nameVal, OBJPROP_COLOR, clrGreen);
+        if(i == 6) ObjectSetInteger(0, nameVal, OBJPROP_COLOR, GetTodayClosedPnl() >= 0 ? clrGreen : clrRed);
     }
     ChartRedraw(0);
 }
@@ -1315,23 +1140,17 @@ void OnTick()
     // EVALUACIÓN DE SEÑALES DE ENTRADA (Sobre velas cerradas)
     // ============================================================================
     double emaFastVal[], emaSlowVal[];
-    double atrVal[], adxVal[];
+    double atrVal[];
     
     ArrayResize(emaFastVal, 210);
     ArrayResize(emaSlowVal, 210);
     ArrayResize(atrVal, 210);
-    ArrayResize(adxVal, 20);
     
     ArraySetAsSeries(emaFastVal, true);
     ArraySetAsSeries(emaSlowVal, true);
     ArraySetAsSeries(atrVal, true);
-    ArraySetAsSeries(adxVal, true);
     
     for(int i = 0; i < 210; i++) atrVal[i] = CalculateATR(i, atrFilterLen);
-    for(int i = 0; i < 20; i++)
-    {
-        adxVal[i] = CalculateADX(i, adxLen);
-    }
     
     double rawFast[], rawSlow[];
     CalculateEMAs(250, rawFast, rawSlow);
@@ -1364,31 +1183,9 @@ void OnTick()
     bool strongBull = candleGreen && (body >= atrVal[1] * bodyMinMult);
     bool strongBear = candleRed && (body >= atrVal[1] * bodyMinMult);
     
-    bool inSession = IsInSessionUTC(sessionStr, iTime(Symbol(), _Period, 1));
-    double distEMAs = MathAbs(emaFastVal[1] - emaSlowVal[1]);
-    bool aberturaOK = !useEMASpread || (distEMAs >= (atrVal[1] * emaSpreadMult));
-    
     double md = GetIMACD(1, imacdLen);
     bool imacdLongOK = !useIMACD || (md >= 0.0);
     bool imacdShortOK = !useIMACD || (md <= 0.0);
-    
-    bool haStrengthLong = !useHAStrength || (haBars[1].low == haBars[1].open);
-    bool haStrengthShort = !useHAStrength || (haBars[1].high == haBars[1].open);
-    
-    bool adxOK = !useADX || (adxVal[1] >= adxMin);
-    bool atrOK = !useATRMin || (atrVal[1] >= atrMinUSD);
-    
-    bool sobreextendido = false;
-    if(maxOverextensionMult > 0.0)
-    {
-        double slowEmaVal = emaSlowVal[1];
-        double closePrice = iClose(Symbol(), _Period, 1);
-        double atrValue = atrVal[1];
-        if(closePrice - slowEmaVal > maxOverextensionMult * atrValue || slowEmaVal - closePrice > maxOverextensionMult * atrValue)
-        {
-            sobreextendido = true;
-        }
-    }
     
 
     
@@ -1605,61 +1402,4 @@ double CalculateATR(int index, int period)
     return(atr);
 }
 
-//+------------------------------------------------------------------+
-//| Average Directional Index (ADX) calculation                      |
-//+------------------------------------------------------------------+
-double CalculateADX(int index, int period)
-{
-    int size = period * 4;
-    double highs[], lows[], closes[];
-    ArraySetAsSeries(highs, true); ArraySetAsSeries(lows, true); ArraySetAsSeries(closes, true);
-    int copiedH = CopyHigh(Symbol(), _Period, 0, size, highs);
-    int copiedL = CopyLow(Symbol(), _Period, 0, size, lows);
-    int copiedC = CopyClose(Symbol(), _Period, 0, size, closes);
-    int copied = MathMin(copiedH, MathMin(copiedL, copiedC));
-    if(copied <= period + 2) return(20.0);
-    
-    double tr[], dmPlus[], dmMinus[];
-    ArrayResize(tr, copied - 1);
-    ArrayResize(dmPlus, copied - 1);
-    ArrayResize(dmMinus, copied - 1);
-    for(int i = 0; i < copied - 1; i++)
-    {
-        double hl = highs[i] - lows[i];
-        double hc = MathAbs(highs[i] - closes[i+1]);
-        double lc = MathAbs(lows[i] - closes[i+1]);
-        tr[i] = MathMax(hl, MathMax(hc, lc));
-        
-        double up = highs[i] - highs[i+1];
-        double down = lows[i+1] - lows[i];
-        dmPlus[i] = (up > 0 && up > down) ? up : 0.0;
-        dmMinus[i] = (down > 0 && down > up) ? down : 0.0;
-    }
-    
-    double atr = 0.0, smoothedPlus = 0.0, smoothedMinus = 0.0;
-    int startIdx = copied - 2;
-    for(int i = 0; i < period; i++)
-    {
-        atr += tr[startIdx - i];
-        smoothedPlus += dmPlus[startIdx - i];
-        smoothedMinus += dmMinus[startIdx - i];
-    }
-    atr /= period;
-    smoothedPlus /= period;
-    smoothedMinus /= period;
-    
-    for(int i = startIdx - period; i >= index; i--)
-    {
-        atr = (atr * (period - 1) + tr[i]) / period;
-        smoothedPlus = (smoothedPlus * (period - 1) + dmPlus[i]) / period;
-        smoothedMinus = (smoothedMinus * (period - 1) + dmMinus[i]) / period;
-    }
-    
-    if(atr == 0.0) return(0.0);
-    double diPlus = 100.0 * (smoothedPlus / atr);
-    double diMinus = 100.0 * (smoothedMinus / atr);
-    
-    double diSum = diPlus + diMinus;
-    double dx = diSum == 0.0 ? 0.0 : 100.0 * MathAbs(diPlus - diMinus) / diSum;
-    return(dx);
-}
+
