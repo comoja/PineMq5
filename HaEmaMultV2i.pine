@@ -417,8 +417,8 @@ pendingShortSignal = (bandera == "posibleVenta")
 // ════════════════════════════════════════════════════════════════════
 // 11. GATILLOS DE ENTRADA Y CÁLCULO DE LOTAJE / RIESGO
 // ════════════════════════════════════════════════════════════════════
-isLongAligned = pendingLongSignal and close > open and haClose > haOpen and strongBull and imacdLongOK and haStrengthLong and inSession and aberturaOK and atrOK and adxOK and not sobreextendido
-isShortAligned = pendingShortSignal and close < open and haClose < haOpen and strongBear and imacdShortOK and haStrengthShort and inSession and aberturaOK and atrOK and adxOK and not sobreextendido
+isLongAligned = pendingLongSignal and strongBull and imacdLongOK // and close > open and haClose > haOpen and haStrengthLong and inSession and aberturaOK and atrOK and adxOK and not sobreextendido
+isShortAligned = pendingShortSignal and strongBear and imacdShortOK // and close < open and haClose < haOpen and haStrengthShort and inSession and aberturaOK and atrOK and adxOK and not sobreextendido
 
 triggerLong  = isLongAligned
 triggerShort = isShortAligned

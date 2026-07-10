@@ -1422,8 +1422,8 @@ void OnTick()
     pendingLongSignal = (banderaState == "posibleCompra");
     pendingShortSignal = (banderaState == "posibleVenta");
     
-    bool triggerLong = pendingLongSignal && candleGreen && haGreen && strongBull && imacdLongOK && haStrengthLong && inSession && aberturaOK && atrOK && adxOK && !sobreextendido;
-    bool triggerShort = pendingShortSignal && candleRed && haRed && strongBear && imacdShortOK && haStrengthShort && inSession && aberturaOK && atrOK && adxOK && !sobreextendido;
+    bool triggerLong = pendingLongSignal && strongBull && imacdLongOK; // && candleGreen && haGreen && haStrengthLong && inSession && aberturaOK && atrOK && adxOK && !sobreextendido;
+    bool triggerShort = pendingShortSignal && strongBear && imacdShortOK; // && candleRed && haRed && haStrengthShort && inSession && aberturaOK && atrOK && adxOK && !sobreextendido;
     
     double spreadVal = (double)SymbolInfoInteger(Symbol(), SYMBOL_SPREAD);
     bool spreadOk = (spreadVal <= maxSpreadPoints);
