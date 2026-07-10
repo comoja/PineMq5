@@ -128,14 +128,14 @@ if isGold
     imacdLen      := 20
     imacdSignalLen := 3
     atrFilterLen  := 14
-    slBufferPts   := 25.0
-    rrRatio       := 1.5
+    slBufferPts   := 35
+    rrRatio       := 1.8
     useTPChase    := true
-    tpChasePts    := 15.0
-    tpChaseOffset := 2.4
+    tpChasePts    := 10.0
+    tpChaseOffset := 1.8
     maxRiskPerc   := 1.0
     trailDivisions := 4
-    bodyMinMult   := 0.25 // fuerza de la vela mayor o igual al 25% del ATR
+    bodyMinMult   := 0.27 // fuerza de la vela mayor o igual al 25% del ATR
     useBE := false
 else if isSilver
     fastLen       := 10

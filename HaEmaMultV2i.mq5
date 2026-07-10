@@ -176,16 +176,17 @@ int OnInit()
         swingPeriod   = 7;
         imacdLen      = 20;
         atrFilterLen  = 14;
-        slBufferPts   = 0.0;
+        slBufferPts   = 35.0;
         rrRatio       = 1.8;
         useIMACD      = true;
         useTPChase    = true;
-        tpChasePts    = 12.0;
-        tpChaseOffset = 0.75;
+        tpChasePts    = 10.0;
+        activeChaseOffset = 1.8; // Se inicializará con esto o vía ATR si aplica
+        tpChaseOffset = 1.8;
         maxRiskPerc   = 1.0;
         trailDivisions = 4;
         maxSpreadPoints = 300.0;
-        bodyMinMult   = 0.25;
+        bodyMinMult   = 0.27;
         useBE = false;
     }
     else if(autoProfile && isSilver)
