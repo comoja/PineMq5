@@ -158,6 +158,7 @@ void UpdateTradeBoxes(double entryPrice, double slVal, double tpVal);
 void DrawSetupMark(datetime signalTime, int direction);
 double FindSwingLow(int radius);
 double FindSwingHigh(int radius);
+double CalculateSMMAValue(double &src[], int targetIndex, int len);
 int GetOwnPositionType();
 
 //+------------------------------------------------------------------+
@@ -578,6 +579,33 @@ double FindSwingHigh(int radius)
 //+------------------------------------------------------------------+
 //| Impulse MACD calculation matching LazyBear exact formulas       |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| Smoothed Moving Average (SMMA) calculation                      |
+//+------------------------------------------------------------------+
+double CalculateSMMAValue(double &src[], int targetIndex, int len)
+{
+    int size = ArraySize(src);
+    if(size < len + targetIndex) return(0.0);
+    
+    double smma = 0.0;
+    double sum = 0.0;
+    int oldestStart = size - len;
+    for(int i = 0; i < len; i++)
+    {
+        sum += src[oldestStart + i];
+    }
+    smma = sum / len;
+    
+    for(int i = oldestStart - 1; i >= targetIndex; i--)
+    {
+        smma = (smma * (len - 1) + src[i]) / len;
+    }
+    return(smma);
+}
+
+//+------------------------------------------------------------------+
+//| Impulse MACD calculation matching LazyBear exact formulas       |
+//+------------------------------------------------------------------+
 double GetIMACD(int targetIndex, int len)
 {
     int size = len * 6;
@@ -625,18 +653,8 @@ double GetIMACD(int targetIndex, int len)
     
     double mi = ema1[targetIndex] + (ema1[targetIndex] - ema2[targetIndex]);
     
-    double hi = highs[targetIndex];
-    double lo = lows[targetIndex];
-    for(int i = 1; i < len; i++)
-    {
-        if(highs[targetIndex + i] > hi) hi = highs[targetIndex + i];
-        if(lows[targetIndex + i] < lo) lo = lows[targetIndex + i];
-    }
-    
-    double sumH = 0, sumL = 0;
-    for(int i = 0; i < len; i++) { sumH += highs[targetIndex + i]; sumL += lows[targetIndex + i]; }
-    double smmaH = sumH / len;
-    double smmaL = sumL / len;
+    double smmaH = CalculateSMMAValue(highs, targetIndex, len);
+    double smmaL = CalculateSMMAValue(lows, targetIndex, len);
     
     if(mi > smmaH) return(mi - smmaH);
     if(mi < smmaL) return(mi - smmaL);
