@@ -15,10 +15,15 @@
 // ══════════════════════════════════════════════════════════════════════════
 
 strategy("Sniper + SHA v2", overlay=true,
-         initial_capital      = 460,
+         initial_capital      = 600,
          default_qty_type     = strategy.percent_of_equity,
-         default_qty_value    = 8,
+         default_qty_value    = 10,
+         margin_long          = 2, // Apalancamiento 1:50 realista para MT5
+         margin_short         = 2,
          process_orders_on_close = true,
+         calc_on_every_tick   = true,
+         calc_on_order_fills  = true,
+         slippage             = 10,
          commission_type      = strategy.commission.percent,
          commission_value     = 0.04)
 
@@ -57,9 +62,11 @@ bool effForex  = marketType == "forex"  or (marketType == "auto" and isForex)
 // ══════════════════════════════════════════════════════════════════════════
 gRiesgo      = "═══ Gestión de Riesgo ═══"
 riesgoPct    = input.float(1.0,  "Riesgo por operación (%)",         minval=0.1, maxval=10.0, step=0.1,  group=gRiesgo)
-minRR        = input.float(1.2,  "RR mínimo (TP/SL)",                minval=0.5, maxval=5.0,  step=0.1,  group=gRiesgo)
-atrMultInp   = input.float(0.5,  "Multiplicador ATR para SL",        minval=0.05, maxval=3.0, step=0.05, group=gRiesgo)
-beRRInp      = input.float(0.4,  "Break-even trigger (× riesgo)",    minval=0.1, maxval=1.0,  step=0.05, group=gRiesgo, tooltip="SL sube a entrada cuando precio avanza esta fracción del riesgo inicial")
+minRR        = input.float(1.8,  "RR mínimo (TP/SL)",                minval=0.5, maxval=5.0,  step=0.1,  group=gRiesgo)
+atrMultInp   = input.float(1.0,  "Multiplicador ATR para SL",        minval=0.05, maxval=5.0, step=0.05, group=gRiesgo)
+useTrailing  = input.bool(false, "Usar Trailing Stop (Dinámico)",    group=gRiesgo)
+useDynTP     = input.bool(true,  "Usar TP Dinámico (Cierre x SHA)",  group=gRiesgo)
+beRRInp      = input.float(1.5,  "Break-even trigger (× riesgo)",    minval=0.1, maxval=3.0,  step=0.05, group=gRiesgo, tooltip="SL sube a entrada cuando precio avanza esta fracción del riesgo inicial")
 cooldownBars = input.int(8,      "Velas de enfriamiento (cooldown)", minval=0, group=gRiesgo, tooltip="Número de velas a esperar para volver a entrar tras cerrar una posición")
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -70,6 +77,7 @@ useAdxFilter = input.bool(true,  "Usar Filtro ADX",                 group=gEntra
 adxMinInp    = input.int(23,    "ADX mínimo",                       minval=10, maxval=50,   group=gEntrada)
 adxRisingInp = input.bool(false, "Exigir ADX subiendo",             group=gEntrada)
 useHtfInp    = input.bool(true,  "Filtro HTF 1H (solo índices)",    group=gEntrada)
+useMacro     = input.bool(true,  "Filtro Macro 14D (Bloqueos)",     group=gEntrada)
 maxDistInp   = input.float(2.0,  "Distancia máx. a EMA (× ATR)",   minval=0.5, maxval=10.0, step=0.5, group=gEntrada)
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -88,22 +96,72 @@ gSha   = "═══ Velas SHA ═══"
 shaLen = input.int(10, "Período SHA", minval=3, maxval=50, group=gSha)
 
 // ══════════════════════════════════════════════════════════════════════════
-// PARÁMETROS ADAPTATIVOS POR TIPO DE ACTIVO
+// GRUPO: SMC SNIPER ENTRY (FLIP ZONES)
 // ══════════════════════════════════════════════════════════════════════════
-float atrMult = effSilver ? 0.1 : effGold ? 0.3 : effCrypto ? 0.15 : effIndex ? atrMultInp : 0.6
+gSMC = "═══ SMC Sniper Entry ═══"
+useSMC = input.bool(true, "Activar Sniper Entry Estructural (SMC)", group=gSMC, tooltip="Usa quiebres de estructura (BoS) y Pullbacks a Zonas FLIP para el gatillo.")
+smcOnly = input.bool(false, "Modo Exclusivo SMC", group=gSMC, tooltip="Si está activo, ignora EMA e IMACD y solo dispara por estructura SMC.")
+smcPivotLen = input.int(5, "Longitud de Pivots (Velas L/R)", minval=2, maxval=20, group=gSMC)
+smcShowLines = input.bool(true, "Mostrar Zonas FLIP en gráfico", group=gSMC)
+
+// ══════════════════════════════════════════════════════════════════════════
+// PARÁMETROS ADAPTATIVOS Y REGLAS BÁSICAS (ÁRBITRO Y ECOSISTEMAS)
+// ══════════════════════════════════════════════════════════════════════════
+// Hemos apretado el ATR para Plata y Oro (de 2.2 a 1.5) para que el bot compre lotajes mucho más pesados con el mismo riesgo del 1%.
+float atrMult = effCrypto ? 2.0 : effGold ? 1.5 : effSilver ? 1.5 : effIndex ? 1.5 : atrMultInp
+float finalRR = effSilver ? 2.3 : minRR
+float fVol    = effCrypto ? 1.0 : effGold ? 1.1 : effSilver ? 1.3 : effIndex ? 1.2 : 1.0
+bool  restric = effCrypto ? false : effGold ? true : effSilver ? true : effIndex ? true : false
+
+// Filtro de Sesión (NY) y Volumen (SMA 20)
+float volSma  = ta.sma(volume, 20)
+bool  volOk   = (na(volume) or volume == 0 or na(volSma)) ? true : (volume > (volSma * fVol))
+
+// Horario Robusto NY (09:30 a 16:00)
+string tz = "America/New_York"
+int h = hour(time, tz)
+int m = minute(time, tz)
+bool inNY = (h > 9 or (h == 9 and m >= 30)) and (h < 16)
+bool sesionOk= not restric or inNY
+
+// Árbitro: Separar Tendencia vs Reversión (Bandas de Bollinger y RSI)
+float rsiVal = ta.rsi(close, 14)
+[bbMi, bbUp, bbLow] = ta.bb(close, 20, 2.0)
+[_, _, adxVal] = ta.dmi(14, 14)
+
+bool modoTendencia = adxVal > 25
+bool modoRango     = adxVal < 20
+
+// Reversión Híbrida (Modo Rango con Bollinger + RSI)
+bool revLongTrigger  = modoRango and low <= bbLow and rsiVal < 30
+bool revShortTrigger = modoRango and high >= bbUp and rsiVal > 70
+
 float beRR    = effCrypto ? 0.5 : effIndex ? beRRInp : 0.7
-int   adxMin  = effIndex ? math.max(adxMinInp, 28) : (effGold or effSilver) ? 18 : adxMinInp
 int   emaPer  = effSilver ? 9 : 21
 
+// ══════════════════════════════════════════════════════════════════════════
+// DETECCIÓN DE TENDENCIA MACRO (14 DÍAS)
+// ══════════════════════════════════════════════════════════════════════════
+detectarTendenciaMacro14D() =>
+    // Solicitamos el cierre y la media móvil simple de 14 días usando la temporalidad "D" (Daily)
+    sma14_D = request.security(syminfo.tickerid, "D", ta.sma(close, 4))
+    close_D = request.security(syminfo.tickerid, "D", close)
+    
+    macroAlcista = close_D > sma14_D
+    macroBajista = close_D < sma14_D
+    [macroAlcista, macroBajista]
+
+[macroBull, macroBear] = detectarTendenciaMacro14D()
+string trendTxt = macroBull ? "▲ Alcista" : macroBear ? "▼ Bajista" : "─ Neutra"
 // ══════════════════════════════════════════════════════════════════════════
 // INDICADORES
 // ══════════════════════════════════════════════════════════════════════════
 emaVal         = ta.ema(close, emaPer)
-[_, _, adxVal] = ta.dmi(14, 14)
 atrVal         = ta.atr(14)
 
-// Filtro ADX
-bool adxOk = not useAdxFilter or (adxVal > adxMin and (adxRisingInp ? ta.rising(adxVal, 1) : true))
+// Filtro ADX (Tendencia para el SMC Clásico)
+int   adxMin  = effIndex ? math.max(adxMinInp, 28) : (effGold or effSilver) ? 18 : adxMinInp
+bool adxOk = not useAdxFilter or (modoTendencia and adxVal > adxMin and (adxRisingInp ? ta.rising(adxVal, 1) : true))
 
 // Filtro HTF 1 hora
 float ema1h  = request.security(syminfo.tickerid, "60", ta.ema(close, 21), lookahead=barmerge.lookahead_off)
@@ -138,121 +196,80 @@ calcLotaje(equity, riskPct, slDist) =>
     float pv          = syminfo.pointvalue
     pv > 0 and slDist > 0 ? montoRiesgo / (slDist * pv) : 0.0
 
-// Función para actualizar el SL dinámico en LONG (Compra)
-actualizarSlLong(precioHigh, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep, tSl, distSeguimiento, tRisk, beRR, tTp) =>
+// Función para actualizar el SL dinámico en LONG (Compra) - TRAIL LENTO
+actualizarSlLong(precioHigh, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep, tSl, distSeguimiento, tRisk, beRR, tTp, atrVal, useTrailing, useDynTP) =>
     float nuevoSl = tSl
     int nuevoStep = tStep
     float nuevaDist = distSeguimiento
     float nuevoTp = tTp
     
-    float TP1 = tEnt + tpTercio
-    float TP2 = tEnt + (tpTercio * 2.0)
-    float TP3 = tEnt + tpDist
-    float SL1 = slInicial + slTercio
-    float BE  = tEnt
+    float TP_Mitad = tEnt + (tpDist * 0.5)
+    float TP_85    = tEnt + (tpDist * 0.85)
+    float BE       = tEnt
     
-    // 1. Regreso inmediato (BE): si avanza la distancia de beRR, SL va a entrada (BE)
-    if precioHigh >= tEnt + tRisk * beRR
-        nuevoSl := math.max(nuevoSl, BE)
-        if nuevoStep < 1
-            nuevoStep := 1
-            
-    // 2. Regla especial: si el SL > TP3 * (4/6) y el precio < TP3 entonces borras el TP final y el TP3
-    float slLimite4_6 = tEnt + tpDist * (4.0 / 6.0)
-    float slLimite5_6 = tEnt + tpDist * (5.0 / 6.0)
-    
-    if not na(nuevoTp) and nuevoSl > slLimite4_6 and precioHigh < TP3
-        nuevoTp := na
-    else
-        // si el precio > TP3 * (5/6) y el precio < TP3 entonces borras el TP final y el TP3 y el SL se convierte en TP3 * (5/6) y se mueve al mismo tiempo que el precio
-        if precioHigh > slLimite5_6 and (na(nuevoTp) or precioHigh < TP3)
-            nuevoTp := na
-            if tStep < 4
-                nuevoStep := 4
-                nuevoSl   := slLimite5_6
-                nuevaDist := precioHigh - nuevoSl
-            else
-                if not na(distSeguimiento)
-                    float trailingSl = precioHigh - distSeguimiento
-                    if trailingSl > tSl
-                        nuevoSl := trailingSl
+    // Máquina de estados combinada
+    if precioHigh >= TP_85
+        // Fase 2: Ya casi tocamos TP inicial
+        if tStep < 2
+            nuevoStep := 2
+            if useTrailing
+                nuevaDist := atrVal * 0.5
+                nuevoSl   := precioHigh - nuevaDist
+            if useDynTP
+                nuevoTp   := precioHigh + (atrVal * 0.3) // TP se pone delante a una fracción del ATR
         else
-            // si el precio >= (TP2 + (TP3/6)) entonces SL = TP3/2 de aqui en adelante se debera mover al mismo tiempo que el precio
-            if precioHigh >= (TP2 + (tpDist / 6.0))
-                if tStep < 3
-                    nuevoStep := 3
-                    nuevoSl   := tEnt + (tpDist * 0.5)
-                    nuevaDist := precioHigh - nuevoSl
-                else
-                    if not na(distSeguimiento)
-                        float trailingSl = precioHigh - distSeguimiento
-                        if trailingSl > tSl
-                            nuevoSl := trailingSl
-            else if precioHigh >= TP2
-                nuevoSl := math.max(nuevoSl, TP1)
-                if nuevoStep < 2
-                    nuevoStep := 2
-            else if precioHigh >= TP1
-                nuevoSl := math.max(nuevoSl, SL1)
+            if useTrailing and not na(distSeguimiento)
+                float trailingSl = precioHigh - distSeguimiento
+                if trailingSl > tSl
+                    nuevoSl := trailingSl
+            if useDynTP
+                // En cada paso en esta fase, el TP huye pero a una distancia que un spike puede alcanzar (0.3 ATR)
+                float trailingTp = precioHigh + (atrVal * 0.3)
+                if trailingTp > tTp
+                    nuevoTp := trailingTp
+    else if precioHigh >= TP_Mitad
+        // Fase 1: Mitad del recorrido
+        if useTrailing
+            nuevoSl := math.max(nuevoSl, BE)
+        if tStep < 1
+            nuevoStep := 1
             
     [nuevoSl, nuevoStep, nuevaDist, nuevoTp]
 
-// Función para actualizar el SL dinámico en SHORT (Venta)
-actualizarSlShort(precioLow, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep, tSl, distSeguimiento, tRisk, beRR, tTp) =>
+// Función para actualizar el SL dinámico en SHORT (Venta) - TRAIL LENTO
+actualizarSlShort(precioLow, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep, tSl, distSeguimiento, tRisk, beRR, tTp, atrVal, useTrailing, useDynTP) =>
     float nuevoSl = tSl
     int nuevoStep = tStep
     float nuevaDist = distSeguimiento
     float nuevoTp = tTp
     
-    float TP1 = tEnt - tpTercio
-    float TP2 = tEnt - (tpTercio * 2.0)
-    float TP3 = tEnt - tpDist
-    float SL1 = slInicial - slTercio
-    float BE  = tEnt
+    float TP_Mitad = tEnt - (tpDist * 0.5)
+    float TP_85    = tEnt - (tpDist * 0.85)
+    float BE       = tEnt
     
-    // 1. Regreso inmediato (BE): si cae la distancia de beRR, SL va a entrada (BE)
-    if precioLow <= tEnt - tRisk * beRR
-        nuevoSl := math.min(nuevoSl, BE)
-        if nuevoStep < 1
-            nuevoStep := 1
-            
-    // 2. Regla especial: si el SL > TP3 * (4/6) y el precio < TP3 entonces borras el TP final y el TP3
-    float slLimite4_6 = tEnt - tpDist * (4.0 / 6.0)
-    float slLimite5_6 = tEnt - tpDist * (5.0 / 6.0)
-    
-    if not na(nuevoTp) and nuevoSl < slLimite4_6 and precioLow > TP3
-        nuevoTp := na
-    else
-        // si el precio > TP3 * (5/6) y el precio < TP3 entonces borras el TP final y el TP3 y el SL se convierte en TP3 * (5/6) y se mueve al mismo tiempo que el precio
-        if precioLow < slLimite5_6 and (na(nuevoTp) or precioLow > TP3)
-            nuevoTp := na
-            if tStep < 4
-                nuevoStep := 4
-                nuevoSl   := slLimite5_6
-                nuevaDist := nuevoSl - precioLow
-            else
-                if not na(distSeguimiento)
-                    float trailingSl = precioLow + distSeguimiento
-                    if trailingSl < tSl
-                        nuevoSl := trailingSl
+    if precioLow <= TP_85
+        // Fase 2: Ya casi tocamos TP inicial
+        if tStep < 2
+            nuevoStep := 2
+            if useTrailing
+                nuevaDist := atrVal * 0.5
+                nuevoSl   := precioLow + nuevaDist
+            if useDynTP
+                nuevoTp   := precioLow - (atrVal * 0.3)
         else
-            // si el precio >= (TP2 + (TP3/6)) entonces SL = TP3/2 de aqui en adelante se debera mover al mismo tiempo que el precio
-            if precioLow <= (TP2 - (tpDist / 6.0))
-                if tStep < 3
-                    nuevoStep := 3
-                    nuevoSl   := tEnt - (tpDist * 0.5)
-                    nuevaDist := nuevoSl - precioLow
-                else
-                    if not na(distSeguimiento)
-                        float trailingSl = precioLow + distSeguimiento
-                        if trailingSl < tSl
-                            nuevoSl := trailingSl
-            else if precioLow <= TP2
-                nuevoSl := math.min(nuevoSl, TP1)
-                if nuevoStep < 2
-                    nuevoStep := 2
-            else if precioLow <= TP1
-                nuevoSl := math.min(nuevoSl, SL1)
+            if useTrailing and not na(distSeguimiento)
+                float trailingSl = precioLow + distSeguimiento
+                if trailingSl < tSl
+                    nuevoSl := trailingSl
+            if useDynTP
+                float trailingTp = precioLow - (atrVal * 0.3)
+                if trailingTp < tTp
+                    nuevoTp := trailingTp
+    else if precioLow <= TP_Mitad
+        if useTrailing
+            nuevoSl := math.min(nuevoSl, BE)
+        if tStep < 1
+            nuevoStep := 1
             
     [nuevoSl, nuevoStep, nuevaDist, nuevoTp]
 
@@ -307,47 +324,121 @@ bool nearEma    = math.abs(close - emaVal) < atrVal * maxDistInp
 bool htfLongOk  = not (effIndex and useHtfInp) or htfBull
 bool htfShortOk = not (effIndex and useHtfInp) or htfBear
 
-// Alineaciones de condiciones
-bool longAligned  = imacdLongOk and adxOk and emaLongOk and nearEma and htfLongOk and shaGreen
-bool shortAligned = imacdShortOk and adxOk and emaShortOk and nearEma and htfShortOk and shaRed
+// ══════════════════════════════════════════════════════════════════════════
+// SMC SNIPER ENTRY (FLIP ZONES & PULLBACKS)
+// ══════════════════════════════════════════════════════════════════════════
+float ph = ta.pivothigh(high, smcPivotLen, smcPivotLen)
+float pl = ta.pivotlow(low, smcPivotLen, smcPivotLen)
 
-// Gatillos: solo se activan cuando las condiciones se alinean por primera vez
-bool longTrigger  = longAligned and not longAligned[1]
-bool shortTrigger = shortAligned and not shortAligned[1]
+var float lastPH = na
+var float lastPL = na
+if not na(ph)
+    lastPH := ph
+if not na(pl)
+    lastPL := pl
 
-bool longC  = permitLong  and longTrigger  and high > high[1]
-bool shortC = permitShort and shortTrigger and low  < low[1]
+var float flipLongZone = na
+var float flipShortZone = na
+
+// BoS Alcista (Ruptura de Resistencia) -> Genera zona para buscar Longs
+if not na(lastPH) and close > lastPH and close[1] <= lastPH
+    flipLongZone := lastPH
+    flipShortZone := na // Limpiar opuesto para mantener contexto
+
+// BoS Bajista (Ruptura de Soporte) -> Genera zona para buscar Shorts
+if not na(lastPL) and close < lastPL and close[1] >= lastPL
+    flipShortZone := lastPL
+    flipLongZone := na
+
+// Dibujar líneas FLIP
+var line flipLineLong = na
+var line flipLineShort = na
+
+if smcShowLines
+    if ta.change(flipLongZone) != 0
+        if not na(flipLineLong)
+            line.delete(flipLineLong)
+        flipLineLong := line.new(bar_index, flipLongZone, bar_index+10, flipLongZone, color=color.new(color.green, 0), style=line.style_dashed, width=2)
+    else if not na(flipLongZone)
+        line.set_x2(flipLineLong, bar_index)
+        
+    if ta.change(flipShortZone) != 0
+        if not na(flipLineShort)
+            line.delete(flipLineShort)
+        flipLineShort := line.new(bar_index, flipShortZone, bar_index+10, flipShortZone, color=color.new(color.red, 0), style=line.style_dashed, width=2)
+    else if not na(flipShortZone)
+        line.set_x2(flipLineShort, bar_index)
+
+// Pullback (Tolerancia 1.0 ATR)
+float tol = atrVal * 1.0
+bool inLongFlip  = not na(flipLongZone) and (low <= flipLongZone + tol and high >= flipLongZone - tol)
+bool inShortFlip = not na(flipShortZone) and (high >= flipShortZone - tol and low <= flipShortZone + tol)
+
+// Gatillos SMC (Sniper Entry con Bearish/Bullish Bias + Filtro Tendencial)
+bool smcLongTrigger  = useSMC and inLongFlip  and shaGreen and not shaGreen[1] and emaLongOk and htfLongOk
+bool smcShortTrigger = useSMC and inShortFlip and shaRed   and not shaRed[1] and emaShortOk and htfShortOk
+
+// ══════════════════════════════════════════════════════════════════════════
+// GATILLOS FINALES (SMC + INDICADORES)
+// ══════════════════════════════════════════════════════════════════════════
+// Alineaciones de condiciones de Indicadores Clásicos
+bool indLongAligned  = imacdLongOk and adxOk and emaLongOk and nearEma and htfLongOk and shaGreen
+bool indShortAligned = imacdShortOk and adxOk and emaShortOk and nearEma and htfShortOk and shaRed
+
+// Gatillos clásicos: solo se activan cuando las condiciones se alinean por primera vez
+bool indLongTrigger  = indLongAligned and not indLongAligned[1]
+bool indShortTrigger = indShortAligned and not indShortAligned[1]
+
+// Fusión de señales (Híbrido: Tendencia SMC vs Reversión Rango)
+bool baseLongTrigger  = smcOnly ? smcLongTrigger : (useSMC ? (smcLongTrigger or indLongTrigger) : indLongTrigger)
+bool baseShortTrigger = smcOnly ? smcShortTrigger : (useSMC ? (smcShortTrigger or indShortTrigger) : indShortTrigger)
+
+bool finalLongTrigger  = baseLongTrigger or revLongTrigger
+bool finalShortTrigger = baseShortTrigger or revShortTrigger
+
+// Price Action Estricto: La vela debe tener impulso real en la dirección deseada
+bool priceActionLong  = close > open // Vela Verde
+bool priceActionShort = close < open // Vela Roja
+
+// Filtro: Bloquear si la tendencia macro está en contra total
+bool macroOkLong  = not useMacro or not macroBear
+bool macroOkShort = not useMacro or not macroBull
+
+bool longC  = permitLong  and finalLongTrigger  and priceActionLong  and volOk and sesionOk and macroOkLong
+bool shortC = permitShort and finalShortTrigger and priceActionShort and volOk and sesionOk and macroOkShort
 
 // ══════════════════════════════════════════════════════════════════════════
 // SEÑALES DE ENTRADA
 // ══════════════════════════════════════════════════════════════════════════
 if longC
+    flipLongZone    := na // Consumir zona para evitar reentradas
     tEnt            := close
     slInicial       := calcSL(true, high[1], low[1], atrVal, atrMult)
     tSl             := slInicial
-    tTp             := calcTP(tEnt, tSl, minRR)
+    tTp             := calcTP(tEnt, tSl, finalRR)
     tRisk           := math.abs(tEnt - tSl)
     slTercio        := tRisk / 3.0
     tpTercio        := math.abs(tTp - tEnt) / 3.0
     distSeguimiento := na
     tStep           := 0
     strategy.entry("L", strategy.long)
-    label.new(bar_index, low,  "▲ COMPRA", color=color.green, textcolor=color.white, style=label.style_label_up,   size=size.small)
+    label.new(bar_index, low,  "▲ COMPRA" , color=color.green, textcolor=color.white, style=label.style_label_up,   size=size.small)
     box.new(bar_index, tTp,  bar_index + 10, tEnt, bgcolor=color.new(color.green, 55), border_color=na)
     box.new(bar_index, tEnt, bar_index + 10, tSl,  bgcolor=color.new(color.red,   55), border_color=na)
 
 if shortC
+    flipShortZone   := na // Consumir zona para evitar reentradas
     tEnt            := close
     slInicial       := calcSL(false, high[1], low[1], atrVal, atrMult)
     tSl             := slInicial
-    tTp             := calcTP(tEnt, tSl, minRR)
+    tTp             := calcTP(tEnt, tSl, finalRR)
     tRisk           := math.abs(tEnt - tSl)
     slTercio        := tRisk / 3.0
     tpTercio        := math.abs(tTp - tEnt) / 3.0
     distSeguimiento := na
     tStep           := 0
     strategy.entry("S", strategy.short)
-    label.new(bar_index, high, "▼ VENTA",  color=color.red,   textcolor=color.white, style=label.style_label_down, size=size.small)
+    label.new(bar_index, high, "▼ VENTA" ,  color=color.red,   textcolor=color.white, style=label.style_label_down, size=size.small)
     box.new(bar_index, tEnt, bar_index + 10, tTp,  bgcolor=color.new(color.green, 55), border_color=na)
     box.new(bar_index, tSl,  bar_index + 10, tEnt, bgcolor=color.new(color.red,   55), border_color=na)
 
@@ -360,26 +451,26 @@ if strategy.position_size != 0 and not na(tRisk) and not na(tTp)
     float tpDist = math.abs(tTp - tEnt)
 
     if strategy.position_size > 0
-        // Actualización LONG
-        float viejoSl = tSl
-        [nuevoSl, nuevoStep, nuevaDist, nuevoTp] = actualizarSlLong(high, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep, tSl, distSeguimiento, tRisk, beRR, tTp)
-        tSl             := nuevoSl
-        tStep           := nuevoStep
-        distSeguimiento := nuevaDist
-        tTp             := nuevoTp
-        if tSl != viejoSl
-            trailMoved := true
+        if useTrailing or useDynTP
+            float viejoSl = tSl
+            [nuevoSl, nuevoStep, nuevaDist, nuevoTp] = actualizarSlLong(high, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep, tSl, distSeguimiento, tRisk, beRR, tTp, atrVal, useTrailing, useDynTP)
+            tSl             := nuevoSl
+            tStep           := nuevoStep
+            distSeguimiento := nuevaDist
+            tTp             := nuevoTp
+            if tSl != viejoSl
+                trailMoved := true
 
     if strategy.position_size < 0
-        // Actualización SHORT
-        float viejoSl = tSl
-        [nuevoSl, nuevoStep, nuevaDist, nuevoTp] = actualizarSlShort(low, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep, tSl, distSeguimiento, tRisk, beRR, tTp)
-        tSl             := nuevoSl
-        tStep           := nuevoStep
-        distSeguimiento := nuevaDist
-        tTp             := nuevoTp
-        if tSl != viejoSl
-            trailMoved := true
+        if useTrailing or useDynTP
+            float viejoSl = tSl
+            [nuevoSl, nuevoStep, nuevaDist, nuevoTp] = actualizarSlShort(low, tEnt, slInicial, slTercio, tpTercio, tpDist, tStep, tSl, distSeguimiento, tRisk, beRR, tTp, atrVal, useTrailing, useDynTP)
+            tSl             := nuevoSl
+            tStep           := nuevoStep
+            distSeguimiento := nuevaDist
+            tTp             := nuevoTp
+            if tSl != viejoSl
+                trailMoved := true
 
     strategy.exit("Exit", stop=tSl, limit=tTp)
 
@@ -415,7 +506,7 @@ plotshape(trailMoved and strategy.position_size < 0, title="Trail SHORT", locati
 // ══════════════════════════════════════════════════════════════════════════
 // TABLA DE ESTADO
 // ══════════════════════════════════════════════════════════════════════════
-var table panel = table.new(position.top_right, 2, 7,
+var table panel = table.new(position.top_right, 2, 8,
                             bgcolor=color.new(color.black, 20),
                             border_width=1, border_color=color.gray)
 if barstate.islast
@@ -439,3 +530,8 @@ if barstate.islast
     table.cell(panel, 1, 5, str.tostring(math.round(adxVal, 1)) + (adxOk ? " ✓" : " ✗"), text_color=adxOk ? color.green : color.red, text_size=size.small)
     table.cell(panel, 0, 6, "Capital",  text_color=color.white,  text_size=size.small)
     table.cell(panel, 1, 6, "$" + str.tostring(strategy.equity, "#.##"), text_color=color.green, text_size=size.small)
+    
+    
+    color  trendCol = macroBull ? color.green : macroBear ? color.red : color.gray
+    table.cell(panel, 0, 7, "Macro 14D",  text_color=color.white,  text_size=size.small)
+    table.cell(panel, 1, 7, trendTxt,     text_color=trendCol,     text_size=size.small)

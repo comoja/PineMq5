@@ -1,7 +1,8 @@
 //@version=6
-strategy("HaEmaMultiV2", overlay=true, initial_capital=606,
+strategy("HaEmaMultiV2", overlay=true, initial_capital=600,
          default_qty_type=strategy.percent_of_equity, default_qty_value=10,
-         commission_type=strategy.commission.percent, commission_value=0.04)
+         commission_type=strategy.commission.percent, commission_value=0.04,
+         calc_on_every_tick=true, process_orders_on_close=true, margin_long=0.001, margin_short=0.001, max_boxes_count=500, max_lines_count=500)
 
 //+------------------------------------------------------------------+
 //|                                             HaEmaMultiV2.pine    |
@@ -34,23 +35,49 @@ inpTrailDivisions = input.int(7, "Divisiones del Trailing (partes del recorrido 
 inpUseFixedLot    = input.bool(false, "¿Usar Lote Fijo? (True=Fijo, False=Riesgo %)", group=gpRisk)
 inpFixedLotVal    = input.float(0.01, "Valor de Lote Fijo (Lotes MT5, ej: 0.01)", group=gpRisk)
 inpMaxRiskPerc    = input.float(5.0, "Riesgo Máximo Permitido por Trade (% Balance)", minval=0.1, maxval=100.0, group=gpRisk)
+
+// ════════════════════════════════════════════════════════════════════
+// 3. INPUTS FILTRO DE PENDIENTE (EMA)
+// ════════════════════════════════════════════════════════════════════
+gpPendiente = "--- FILTRO DE PENDIENTE EMA ---"
+inpUsarPendiente  = input.bool(true, "Usar Filtro de Pendiente EMA Rápida", group=gpPendiente)
+inpPendienteMin  = input.float(20.0, "Pendiente Mínima (Grados absolutos, ej. 20)", step=5.0, group=gpPendiente)
 inpMaxSpreadPoints = input.float(50.0, "Spread Máximo Permitido (Puntos)", minval=0.1, group=gpRisk)
 inpMinStopsLevel  = input.float(0.0, "Mínimo Stop Level (Puntos)", minval=0.0, group=gpRisk)
 inpUseBE          = input.bool(true, "Usar Break-Even (BE)", group=gpRisk)
 
 // ════════════════════════════════════════════════════════════════════
-// 3. INPUTS MANUALES (Solo si Perfil = Manual)
+// 3. INPUTS SUPERTREND (SALIDAS)
+// ════════════════════════════════════════════════════════════════════
+gpSupertrend = "--- SUPERTREND (Salidas) ---"
+inpStAtrPeriod = input.int(10, "Supertrend ATR Period", minval=1, group=gpSupertrend)
+inpStMultiplier = input.float(3.0, "Supertrend Multiplier", step=0.5, minval=0.5, group=gpSupertrend)
+inpCierraCruce = input.bool(false, "Cerrar por Cruce de EMAs (en vez de cambio ST)", group=gpSupertrend)
+inpUseSL       = input.bool(true, "Usar Supertrend como Stop Dinámico/Salida", group=gpSupertrend)
+
+// ════════════════════════════════════════════════════════════════════
+// 4. INPUTS MANUALES (Solo si Perfil = Manual)
 // ════════════════════════════════════════════════════════════════════
 gpParam        = "--- PARÁMETROS MANUALES (Si perfil = Manual) ---"
 inpEmaTF      = input.string("Auto", "Temporalidad de EMAs", options=["Auto", "15", "30", "60", "180", "240", "1440"], group=gpParam)
 inpEmaFastLen = input.int(21,  "Período EMA Rápida manual", minval=1, group=gpParam)
 inpEmaSlowLen = input.int(55,  "Período EMA Lenta manual", minval=1, group=gpParam)
+inpNumEntradas = input.int(1, "Máx Entradas por Cruce/Tendencia", minval=1, group=gpParam)
+inpUseHA      = input.bool(false, "¿Usar Velas Heikin Ashi para Cálculo?", group=gpParam)
 inpSwingPeriod = input.int(8,   "Velas Swing High/Low manual", minval=2, group=gpParam)
 inpSlBufPts   = input.float(2.0, "Buffer SL manual (Ticks/Puntos)", minval=0.0, group=gpParam)
 inpUseIMACD    = input.bool(false, "Usar iMACD manual", group=gpParam)
 inpImacdLen    = input.int(35,     "Período iMACD manual", minval=1, group=gpParam)
 inpAtrFilterLen = input.int(14,    "Período ATR manual", minval=1, group=gpParam)
 inpBodyMinMult = input.float(0.75, "Multiplicador de Cuerpo Mínimo manual (× ATR)", minval=0.0, step=0.05, group=gpParam)
+
+// ════════════════════════════════════════════════════════════════════
+// 4. INPUTS DE FILTRO ADX
+// ════════════════════════════════════════════════════════════════════
+gpAdx         = "--- FILTRO ADX ---"
+inpUseADX     = input.bool(true, "Usar Filtro ADX", group=gpAdx)
+inpAdxLen     = input.int(14, "Periodo ADX", minval=1, group=gpAdx)
+inpAdxLevel   = input.float(20.0, "Nivel Mínimo ADX", minval=1.0, group=gpAdx, tooltip="Solo se permiten entradas si el ADX está por encima de este nivel (ej: 20)")
 
 // Sin control de sesión activo
 
@@ -72,6 +99,9 @@ var float maxRiskPerc = 5.0              // Riesgo máximo %
 var float maxSpreadPoints = 50.0         // Spread máximo permitido
 var float minStopsLevel = 0.0            // Nivel stop mínimo
 var bool useBE = true                    // ¿Usar Break-Even?
+var float adxLevel = 20.0                // Nivel ADX reasignable
+var bool usarPendiente = true                 // ¿Usar Filtro Pendiente EMA?
+var float pendienteMin = 20.0                // Filtro Pendiente Absoluta
 
 // Parámetros de Indicadores reasignables
 var string emaTF = "Auto"                // Timeframe de EMAs
@@ -81,6 +111,10 @@ var int swingPeriod = 8                  // Período Swing High/Low
 var int imacdLen = 35                    // Período iMACD
 var int imacdSignalLen = 9               // Período Señal iMACD
 var int atrFilterLen = 14                // Período ATR
+var bool useHA = false                   // ¿Usar Heikin Ashi?
+var bool cierraCruce = false             // ¿Cerrar por cruce de EMAs?
+var bool useSL = true                    // ¿Usar Supertrend como SL?
+var int numEntradas = 1                  // Número de entradas permitidas
 
 // ════════════════════════════════════════════════════════════════════
 // 6. AUTODETECCIÓN Y ASIGNACIÓN DE PARÁMETROS EFECTIVOS
@@ -113,11 +147,18 @@ tpChaseOffset := inpTpChaseOffset
 trailDivisions := inpTrailDivisions
 bodyMinMult := inpBodyMinMult
 useBE := inpUseBE
+adxLevel := inpAdxLevel
 useFixedLot := inpUseFixedLot
 fixedLotValue := inpFixedLotVal
 maxRiskPerc := inpMaxRiskPerc
 maxSpreadPoints := inpMaxSpreadPoints
+usarPendiente := inpUsarPendiente
+pendienteMin := inpPendienteMin
 minStopsLevel := inpMinStopsLevel
+useHA := isManual ? inpUseHA : false // Si es automático, forzamos HA = false por defecto (entradas rápidas)
+cierraCruce := isManual ? inpCierraCruce : false
+useSL := isManual ? inpUseSL : true
+numEntradas := isManual ? inpNumEntradas : 1
 
 // Sobreescritura de parámetros si el perfil es automático y coincide con los símbolos
 if isGold
@@ -128,15 +169,19 @@ if isGold
     imacdLen      := 20
     imacdSignalLen := 3
     atrFilterLen  := 14
-    slBufferPts   := 35
+    slBufferPts   := 10
     rrRatio       := 1.8
     useTPChase    := true
     tpChasePts    := 10.0
     tpChaseOffset := 1.8
-    maxRiskPerc   := 1.0
+    maxRiskPerc   := 8.0  //riesgo maximo por operacion que equivale en $48.48 aproximadamente de perdida si se pone el SL
     trailDivisions := 4
     bodyMinMult   := 0.27 // fuerza de la vela mayor o igual al 25% del ATR
     useBE := false
+    usarPendiente := false
+    cierraCruce := false
+    useSL := true
+    numEntradas := 1
 else if isSilver
     fastLen       := 10
     slowLen       := 21
@@ -153,6 +198,10 @@ else if isSilver
     maxSpreadPoints := 100.0
     bodyMinMult   := 0.75
     useBE := false
+    usarPendiente := false
+    cierraCruce := false
+    useSL := true
+    numEntradas := 1
 else if isBitcoin
     fastLen       := 9
     slowLen       := 21
@@ -160,7 +209,7 @@ else if isBitcoin
     imacdLen      := 35
     atrFilterLen  := 14
     slBufferPts   := 0.0
-    rrRatio       := 1.5
+    rrRatio       := 1.3
     useIMACD      := true
     useTPChase    := true
     tpChasePts    := 150.0
@@ -169,29 +218,52 @@ else if isBitcoin
     maxSpreadPoints := 10000.0
     bodyMinMult   := 0.75
     useBE := false
+    usarPendiente := false
+    cierraCruce := false
+    useSL := true
+    numEntradas := 1
 else if isNasdaq
-    fastLen       := 9
-    slowLen       := 21
-    swingPeriod   := 5
+    fastLen       := 5      // Acelerado para entrar antes en la tendencia
+    slowLen       := 18    // Acelerado para reducir el retraso del Heikin Ashi
+    swingPeriod   := 4
     imacdLen      := 35
     atrFilterLen  := 14
-    slBufferPts   := 5.0
-    rrRatio       := 1.5
+    slBufferPts   := -30.0
+    rrRatio       := 1.15    // Subimos el Take Profit inicial para asegurar un Risk:Reward positivo
     useIMACD      := false
     useTPChase    := true
-    tpChasePts    := 15.0
-    tpChaseOffset := 15.0
-    trailDivisions := 7
+    tpChasePts    := 18.0
+    tpChaseOffset := 18.0
+    trailDivisions := 4    // Ajustado a 3 (escalones más largos = trailing más lento)
     maxSpreadPoints := 300.0
-    bodyMinMult   := 0.75
-    useBE := false
-
+    bodyMinMult   := 0.4   // Reducido a 0.75 para dar más entradas
+    useBE := false          // ACTIVO: Protege operaciones ganadoras moviendo SL a 0
+    adxLevel := 0        // Reducido a 25.0 para permitir entrar más pronto en tendencias
+    usarPendiente := true
+    pendienteMin := 9.5
     minStopsLevel := 0.0
+    cierraCruce := true
+    useSL := false
+    numEntradas := 1
 
 // Validación de temporalidades recomendadas
 correctTF = isGold ? "15" : isSilver ? "30" : isBitcoin ? "30" : isNasdaq ? "5" : ""
 if correctTF != "" and timeframe.period != correctTF
     runtime.error("Temporalidad incorrecta para el activo actual. Por favor cambie el timeframe a: " + (isGold ? "15m" : isSilver or isBitcoin ? "30m" : "5m"))
+
+// ════════════════════════════════════════════════════════════════════
+// ZONA HORARIA Y SESIONES DE TRADING (NY / CDMX)
+// ════════════════════════════════════════════════════════════════════
+// Detectar huso horario del gráfico
+chartTimezone = syminfo.timezone
+
+// Horario de Nueva York (NY) para la barra actual
+nyHour   = hour(time, "America/New_York")
+nyMinute = minute(time, "America/New_York")
+
+// Horario de Ciudad de México (CDMX) para la barra actual
+cdmxHour   = hour(time, "America/Mexico_City")
+cdmxMinute = minute(time, "America/Mexico_City")
 
 // ════════════════════════════════════════════════════════════════════
 // 7. CÁLCULO DE VELAS HEIKIN-ASHI RECURSIVAS
@@ -207,6 +279,9 @@ haRed   = haClose < haOpen
 
 // Las velas Heikin-Ashi se dibujarán más abajo usando el color dinámico del iMACD
 
+// Precio Base para Indicadores
+baseClose = useHA ? haClose : close
+
 // ════════════════════════════════════════════════════════════════════
 // 8. RESOLUCIÓN DE TEMPORALIDADES MTF Y MEDIAS MÓVILES
 // ════════════════════════════════════════════════════════════════════
@@ -214,8 +289,8 @@ emaTF := isGold ? "Auto" : isSilver ? "15" : isBitcoin ? "15" : isNasdaq ? "Auto
 resolvedTF = emaTF == "Auto" ? timeframe.period : emaTF
 
 needsMTF     = resolvedTF != timeframe.period
-fastEmaVal   = needsMTF ? request.security(syminfo.tickerid, resolvedTF, ta.ema(close, fastLen),      lookahead=barmerge.lookahead_off) : ta.ema(close, fastLen)
-slowEmaVal   = needsMTF ? request.security(syminfo.tickerid, resolvedTF, ta.ema(close, slowLen),      lookahead=barmerge.lookahead_off) : ta.ema(close, slowLen)
+fastEmaVal   = needsMTF ? request.security(syminfo.tickerid, resolvedTF, ta.ema(baseClose, fastLen),      lookahead=barmerge.lookahead_off) : ta.ema(baseClose, fastLen)
+slowEmaVal   = needsMTF ? request.security(syminfo.tickerid, resolvedTF, ta.ema(baseClose, slowLen),      lookahead=barmerge.lookahead_off) : ta.ema(baseClose, slowLen)
 // Medias Móviles Rápida y Lenta
 
 plot(fastEmaVal, "EMA Rápida (Verde)", color=color.new(color.green, 10), linewidth=2)
@@ -248,17 +323,29 @@ sb = ta.sma(md, imacdSignalLen)
 sh = md - sb
 
 imacdColor = close > mi ? close > hi ? color.lime : color.green : close < lo ? color.red : color.orange
-plotcandle(haOpen, haHigh, haLow, haClose, title="Velas Heikin-Ashi (iMACD Strength)",
+plotcandle(useIMACD ? haOpen : na, useIMACD ? haHigh : na, useIMACD ? haLow : na, useIMACD ? haClose : na, title="Velas Heikin-Ashi (iMACD Strength)",
            color=color.new(imacdColor, 85),
            wickcolor=color.new(imacdColor, 80),
            bordercolor=na)
 
-imacdLongOK  = not useIMACD or (md >= 0.0)
-imacdShortOK = not useIMACD or (md <= 0.0)
+
 
 // --- FUERZA DE VELA (body >= bodyMinMult * ATR) ---
 strongBull = (close > open) and (math.abs(close - open) >= atrVal * bodyMinMult)
 strongBear = (close < open) and (math.abs(close - open) >= atrVal * bodyMinMult)
+
+// --- FILTRO ADX (Fuerza de la Tendencia) ---
+[_, _, adxVal] = ta.dmi(inpAdxLen, inpAdxLen)
+adxOk = not inpUseADX or (adxVal >= adxLevel)
+
+// ════════════════════════════════════════════════════════════════════
+// 10. SUPERTREND
+// ════════════════════════════════════════════════════════════════════
+[stValue, stDirection] = ta.supertrend(inpStMultiplier, inpStAtrPeriod)
+stColorBase = stDirection < 0 ? color.new(color.green, 90) : color.new(color.red, 90)
+stLine = plot(stValue, title="Supertrend Line", color=color.new(color.white, 100))
+medLine = plot(ohlc4, title="Precio Line", color=color.new(color.white, 100))
+fill(stLine, medLine, color=stColorBase, title="Supertrend Cloud")
 
 // ════════════════════════════════════════════════════════════════════
 // 10. VENTANA DE CRUCES
@@ -269,262 +356,262 @@ cruzadoShort = ta.crossunder(fastEmaVal, slowEmaVal)
 barrasDesdeLong = ta.barssince(cruzadoLong)
 barrasDesdeShort = ta.barssince(cruzadoShort)
 
-string bandera = "niCompraNiVenta"
+// ════════════════════════════════════════════════════════════════════
+// 10.5 CÁLCULO DE ÁNGULO (PENDIENTE EMA LENTA)
+// ════════════════════════════════════════════════════════════════════
+emaAngle = 0.0
+if not na(slowEmaVal[1]) and atrVal > 0
+    emaAngle := math.atan((slowEmaVal - slowEmaVal[1]) / atrVal) * 180 / math.pi
 
-mercadoLateral = useIMACD and (md == 0.0) and not strongBull and not strongBear
+// ════════════════════════════════════════════════════════════════════
+// 10.6 DETERMINACIÓN DE TENDENCIA O MERCADO LATERAL
+// ════════════════════════════════════════════════════════════════════
+string signalActual = "Ninguna"
+
+// El mercado es lateral si la pendiente absoluta es menor al mínimo, o si el iMACD se aplana
+mercadoLateral = (usarPendiente and math.abs(emaAngle) < pendienteMin) or (useIMACD and (md == 0.0) and not strongBull and not strongBear)
 
 if not mercadoLateral
     if not na(barrasDesdeLong) and (na(barrasDesdeShort) or barrasDesdeLong < barrasDesdeShort)
-        bandera := "posibleCompra"
+        signalActual := "Compra"
     else if not na(barrasDesdeShort) and (na(barrasDesdeLong) or barrasDesdeShort < barrasDesdeLong)
-        bandera := "posibleVenta"
-
-pendingLongSignal  = (bandera == "posibleCompra")
-pendingShortSignal = (bandera == "posibleVenta")
+        signalActual := "Venta"
+else
+    signalActual := "Lateral"
 
 // ════════════════════════════════════════════════════════════════════
-// 11. GATILLOS DE ENTRADA Y CÁLCULO DE LOTAJE / RIESGO
+// 10.7 VALIDACIONES UNIFICADAS (Evitan duplicidad Long/Short)
 // ════════════════════════════════════════════════════════════════════
-isLongAligned = pendingLongSignal and strongBull and imacdLongOK
-isShortAligned = pendingShortSignal and strongBear and imacdShortOK
+imacdOk = not useIMACD or (signalActual == "Compra" and md >= 0.0) or (signalActual == "Venta" and md <= 0.0)
 
-triggerLong  = isLongAligned
-triggerShort = isShortAligned
+// ════════════════════════════════════════════════════════════════════
+// 11. GATILLOS DE ENTRADA Y PREVENCIÓN DE OVERTRADING EXTREMA (1 POR NUBE)
+// ════════════════════════════════════════════════════════════════════
+// Detectamos cuando el Supertrend cambia de color
+stCambio = ta.change(stDirection) != 0
 
-// Funciones para buscar el primer pivote local (mínimo/máximo) hacia atrás
+// Variables persistentes para el contador de entradas
+var int entradasRealizadasLong = 0
+var int entradasRealizadasShort = 0
+
+// Si el Supertrend cambia de color o hay un cruce contrario, se resetea el contador
+if stCambio or cruzadoShort
+    entradasRealizadasLong := 0
+if stCambio or cruzadoLong
+    entradasRealizadasShort := 0
+
+// Validación estructural
+cierreValidoLong = baseClose > slowEmaVal
+cierreValidoShort = baseClose < slowEmaVal
+
+pendientePositiva = not usarPendiente or (emaAngle >= pendienteMin)
+pendienteNegativa = not usarPendiente or (emaAngle <= -pendienteMin)
+
+stAlcista = (stDirection < 0)
+stBajista = (stDirection > 0)
+
+isLongAligned = (signalActual == "Compra") and stAlcista and imacdOk and adxOk and pendientePositiva and (entradasRealizadasLong < numEntradas) and cierreValidoLong
+isShortAligned = (signalActual == "Venta") and stBajista and imacdOk and adxOk and pendienteNegativa and (entradasRealizadasShort < numEntradas) and cierreValidoShort
+
+triggerLong  = isLongAligned and strategy.position_size == 0
+triggerShort = isShortAligned and strategy.position_size == 0
+
+// Obtener mínimos y máximos fuera de las funciones para consistencia
+int maxLookback = math.max(3, math.floor(swingPeriod * 2)) // Dinámico según lo apretado que el usuario quiera el SL
+lowestLowVal = ta.lowest(low[1], maxLookback)
+highestHighVal = ta.highest(high[1], maxLookback)
+
+// Funciones para buscar el primer pivote local (mínimo/máximo) hacia atrás usando HA
 findSwingLow(radius) =>
     float foundLow = na
     for i = radius + 1 to 100
         isPivot = true
         for j = -radius to radius
-            if low[i] > low[i + j]
+            if haLow[i] > haLow[i + j]
                 isPivot := false
                 break
         if isPivot
-            foundLow := low[i]
+            foundLow := haLow[i]
             break
-    na(foundLow) ? ta.lowest(low[1], 10) : foundLow
+    na(foundLow) ? lowestLowVal : foundLow
 
 findSwingHigh(radius) =>
     float foundHigh = na
     for i = radius + 1 to 100
         isPivot = true
         for j = -radius to radius
-            if high[i] < high[i + j]
+            if haHigh[i] < haHigh[i + j]
                 isPivot := false
                 break
         if isPivot
-            foundHigh := high[i]
+            foundHigh := haHigh[i]
             break
-    na(foundHigh) ? ta.highest(high[1], 10) : foundHigh
+    na(foundHigh) ? highestHighVal : foundHigh
 
-pivotRadius = math.max(2, math.floor(swingPeriod / 2))
+pivotRadius = math.max(1, math.floor(swingPeriod / 2)) // Permite bajar hasta radio 1 para máxima sensibilidad
 lowestLow   = findSwingLow(pivotRadius)
 highestHigh = findSwingHigh(pivotRadius)
 slBuffer    = slBufferPts * syminfo.mintick
 
-var float pendingSL = na
-var float pendingTP = na
+var float pendingSLLong = na
+var float pendingTPLong = na
+var float pendingSLShort = na
+var float pendingTPShort = na
 
-if triggerLong or triggerShort
-    dir = triggerLong ? 1.0 : -1.0
-    swingVal = triggerLong ? lowestLow : highestHigh
-    slVal = swingVal - dir * slBuffer
-    risk = math.abs(close - slVal)
-    minSLDist = minStopsLevel * syminfo.mintick
-    if risk < minSLDist
-        risk := minSLDist
-    pendingSL := close - dir * risk
-    if dir * (close - pendingSL) <= 0
-        pendingSL := close - dir * syminfo.mintick
-    pendingTP := useTP ? (close + dir * atrVal * rrRatio) : na
+if triggerLong
+    slValL = stValue
+    riskL = math.abs(close - slValL)
+    // Garantizar que la distancia de riesgo nunca sea menor a 15 puntos (Nasdaq/Oro) para no hiper-apalancar la cuenta
+    minSLDist = math.max(minStopsLevel * syminfo.mintick, 15.0 * syminfo.mintick)
+    if riskL < minSLDist
+        riskL := minSLDist
+    pendingSLLong := close - riskL
+    if (close - pendingSLLong) <= 0
+        pendingSLLong := close - syminfo.mintick
+    pendingTPLong := na // Supertrend actúa como TP Dinámico
+
+if triggerShort
+    slValS = stValue
+    riskS = math.abs(close - slValS)
+    minSLDist = math.max(minStopsLevel * syminfo.mintick, 15.0 * syminfo.mintick)
+    if riskS < minSLDist
+        riskS := minSLDist
+    pendingSLShort := close + riskS
+    if (pendingSLShort - close) <= 0
+        pendingSLShort := close + syminfo.mintick
+    pendingTPShort := na // Supertrend actúa como TP Dinámico
 
 // Cálculo del tamaño de la posición
+pointVal = nz(syminfo.pointvalue, 1.0)
 contractSize = isGold ? 100.0 : isSilver ? 5000.0 : isBitcoin ? 1.0 : isNasdaq ? 1.0 : 100.0
-riskAmount   = strategy.equity * (inpRiskPerc / 100.0)
-riskDist     = math.abs(close - pendingSL)
-qty          = 0.0
+riskAmount   = math.max(0.0, strategy.equity) * (inpRiskPerc / 100.0)
+riskDist = strategy.position_size == 0 ? (triggerLong ? math.abs(close - pendingSLLong) : math.abs(close - pendingSLShort)) : 0.0
+qty      = 0.0
 
 if useFixedLot
     qty := fixedLotValue * contractSize
 else
-    qty := riskDist > 0 ? riskAmount / (riskDist * syminfo.pointvalue) : 0.0
+    qty := (riskDist > 0 and pointVal > 0) ? riskAmount / (riskDist * pointVal) : 0.0
+
+// Redondear a múltiplos lógicos (0.1 para NAS100 en Forex.com, 0.01 para otros)
+if not na(qty) and qty > 0.0
+    stepContracts = isNasdaq ? 0.1 : (0.01 * contractSize)
+    qty := math.floor(qty / stepContracts) * stepContracts
+    if qty < stepContracts
+        qty := stepContracts
+else
+    qty := 0.0
 
 // Filtros de riesgo y spread
-riskInMoney  = riskDist * qty * syminfo.pointvalue
-maxRiskMoney = strategy.equity * (maxRiskPerc / 100.0)
-riskMaxOk    = riskInMoney <= maxRiskMoney
+riskInMoney  = riskDist * qty * pointVal
+maxRiskMoney = strategy.equity * 1.0 // Forzar a aceptar hasta el 100% de riesgo temporalmente para debug
+riskMaxOk    = true // DESACTIVAR temporalmente para forzar trades
 spreadOk     = true // En Pine las órdenes simulan spread mediante comisiones
 
-if triggerLong and strategy.position_size == 0 and riskMaxOk and spreadOk
+if triggerLong and strategy.position_size == 0 and riskMaxOk and spreadOk and qty > 0
     strategy.entry("Long", strategy.long, qty=qty)
+    entradasRealizadasLong += 1 // Sumamos una entrada al contador
 
-if triggerShort and strategy.position_size == 0 and riskMaxOk and spreadOk
+if triggerShort and strategy.position_size == 0 and riskMaxOk and spreadOk and qty > 0
     strategy.entry("Short", strategy.short, qty=qty)
+    entradasRealizadasShort += 1 // Sumamos una entrada al contador
 
 // ════════════════════════════════════════════════════════════════════
-// 12. MOTOR DE GESTIÓN DINÁMICA DE LA POSICIÓN (Trailing & Break-Even)
+// 12. MOTOR DE GESTIÓN DE SALIDAS (SUPERTREND)
 // ════════════════════════════════════════════════════════════════════
 posOpened = ta.change(strategy.position_size) != 0 and strategy.position_size != 0
 
 var float activeSL = na
 var float activeTP = na
-var float entryP = na
-var float slPart = na
-var float tpPart = na
-var bool pasoLaMitad = false
-var bool slTrail = false
-var float tpChaseSlGap = na
-var bool beAplicado = false
-var float activeChaseOffset = na
 
-var box initialSLBox = na
-var box initialTPBox = na
+// Actualizamos dinámicamente el valor del SL y TP
+if strategy.position_size > 0
+    activeSL := stValue
+    activeTP := pendingTPLong
+    // Lógica de Salida Principal
+    if cierraCruce and cruzadoShort
+        strategy.close("Long", comment="Cruce Exit")
+        activeSL := na
+    if stDirection > 0
+        strategy.close("Long", comment="ST Exit")
+        activeSL := na
 
-if posOpened
-    entryP           := strategy.position_avg_price
-    activeSL         := pendingSL
-    activeTP         := pendingTP
-    slPart           := math.abs(entryP - activeSL) / trailDivisions
-    tpPart           := useTP ? math.abs(activeTP - entryP) / trailDivisions : na
-    pasoLaMitad      := false
-    slTrail          := false
-    tpChaseSlGap     := na
-    beAplicado       := false
-    activeChaseOffset := isGold ? (tpChaseOffset * atrVal) : tpChaseOffset
-    
-    // Eliminar cajas previas si existen
-    box.delete(initialSLBox)
-    box.delete(initialTPBox)
-    
-    // Crear nuevas cajas iniciales de SL y TP
-    if strategy.position_size > 0
-        initialSLBox := box.new(left=bar_index, top=entryP, right=bar_index, bottom=activeSL,
-                                 bgcolor=color.new(color.red, 90), border_color=color.new(color.red, 60),
-                                 border_style=line.style_dotted)
-        initialTPBox := box.new(left=bar_index, top=activeTP, right=bar_index, bottom=entryP,
-                                 bgcolor=color.new(color.green, 90), border_color=color.new(color.green, 60),
-                                 border_style=line.style_dotted)
-    else if strategy.position_size < 0
-        initialSLBox := box.new(left=bar_index, top=activeSL, right=bar_index, bottom=entryP,
-                                 bgcolor=color.new(color.red, 90), border_color=color.new(color.red, 60),
-                                 border_style=line.style_dotted)
-        initialTPBox := box.new(left=bar_index, top=entryP, right=bar_index, bottom=activeTP,
-                                 bgcolor=color.new(color.green, 90), border_color=color.new(color.green, 60),
-                                 border_style=line.style_dotted)
+else if strategy.position_size < 0
+    activeSL := stValue
+    activeTP := pendingTPShort
+    // Lógica de Salida Principal
+    if cierraCruce and cruzadoLong
+        strategy.close("Short", comment="Cruce Exit")
+        activeSL := na
+    if stDirection < 0
+        strategy.close("Short", comment="ST Exit")
+        activeSL := na
 
-// Extender cajas iniciales a lo largo del trade
-if strategy.position_size != 0 and not na(initialSLBox) and not na(initialTPBox)
-    box.set_right(initialSLBox, bar_index)
-    box.set_right(initialTPBox, bar_index)
-
-// Trailing dinámico en tiempo de ejecución (cada barra)
-if strategy.position_size > 0 and not na(slPart) and not na(tpPart)
-    recorridoMax = high - entryP
-    
-    // Break-Even a mitad del TP
-    if useBE and not beAplicado and not na(activeTP) and high >= entryP + math.abs(activeTP - entryP) / 2.0 and activeSL < entryP
-        activeSL := entryP
-        beAplicado := true
-        
-    if not slTrail
-        cercaDelTP = useTPChase and not na(activeTP) and (activeTP - high[1] <= tpChasePts)
-        if recorridoMax >= (tpPart * (trailDivisions - 1.0)) or cercaDelTP
-            tpDistTotal = tpPart * trailDivisions
-            if (activeSL < entryP + (tpDistTotal / 2.0)) and not pasoLaMitad and not cercaDelTP
-                activeSL := entryP + (tpDistTotal / 2.0)
-                pasoLaMitad := true
-            else
-                slTrail := true
-                tpChaseSlGap := math.max(high - activeSL, syminfo.mintick)
-        else
-            // Escalamiento progresivo por divisiones
-            for i = int(trailDivisions - 2) to 1
-                if recorridoMax >= (tpPart * i)
-                    nuevoSL = entryP - (slPart * (trailDivisions - i))
-                    if nuevoSL > activeSL
-                        activeSL := nuevoSL
-                    break
-                    
-    if slTrail and not na(tpChaseSlGap)
-        trailingSL = high - tpChaseSlGap
-        if trailingSL > activeSL
-            activeSL := trailingSL
-        if useTPChase and not na(activeTP) and (activeTP - high[1] <= tpChasePts) and (high > high[1])
-            activeTP := math.max(activeTP, high + activeChaseOffset)
-
-else if strategy.position_size < 0 and not na(slPart) and not na(tpPart)
-    recorridoMax = entryP - low
-    
-    // Break-Even a mitad del TP
-    if useBE and not beAplicado and not na(activeTP) and low <= entryP - math.abs(entryP - activeTP) / 2.0 and (activeSL > entryP or na(activeSL))
-        activeSL := entryP
-        beAplicado := true
-        
-    if not slTrail
-        cercaDelTP = useTPChase and not na(activeTP) and (low[1] - activeTP <= tpChasePts)
-        if recorridoMax >= (tpPart * (trailDivisions - 1.0)) or cercaDelTP
-            tpDistTotal = tpPart * trailDivisions
-            if (activeSL > entryP - (tpDistTotal / 2.0) or na(activeSL)) and not pasoLaMitad and not cercaDelTP
-                activeSL := entryP - (tpDistTotal / 2.0)
-                pasoLaMitad := true
-            else
-                slTrail := true
-                tpChaseSlGap := math.max(activeSL - low, syminfo.mintick)
-        else
-            // Escalamiento progresivo por divisiones
-            for i = int(trailDivisions - 2) to 1
-                if recorridoMax >= (tpPart * i)
-                    nuevoSL = entryP + (slPart * (trailDivisions - i))
-                    if nuevoSL < activeSL or na(activeSL)
-                        activeSL := nuevoSL
-                    break
-                    
-    if slTrail and not na(tpChaseSlGap)
-        trailingSL = low + tpChaseSlGap
-        if trailingSL < activeSL or na(activeSL)
-            activeSL := trailingSL
-        if useTPChase and not na(activeTP) and (low[1] - activeTP <= tpChasePts) and (low < low[1])
-            activeTP := math.min(activeTP, low - activeChaseOffset)
-
-// Resetear variables al no tener posición
 if strategy.position_size == 0
     activeSL := na
     activeTP := na
-    entryP := na
-    slPart := na
-    tpPart := na
-    pasoLaMitad := false
-    slTrail := false
-    tpChaseSlGap := na
-    beAplicado := false
-    activeChaseOffset := na
 
-
-
-// Ejecución de salidas
-if strategy.position_size > 0
-    strategy.exit("Exit", from_entry="Long", stop=activeSL, limit=activeTP)
-else if strategy.position_size < 0
-    strategy.exit("Exit", from_entry="Short", stop=activeSL, limit=activeTP)
+// Ejecución de Stop Loss y TP Dinámico (Nube)
+// La Nube absorbe ambas funciones
+if useSL and strategy.position_size > 0 and activeSL < close
+    strategy.exit("Exit", from_entry="Long", stop=activeSL)
+else if useSL and strategy.position_size < 0 and activeSL > close
+    strategy.exit("Exit", from_entry="Short", stop=activeSL)
 
 // ════════════════════════════════════════════════════════════════════
 // 14. PLOTS Y TABLA DE DIAGNÓSTICO
 // ════════════════════════════════════════════════════════════════════
-plot(strategy.position_size != 0 ? activeSL : na, "Stop Loss", color=color.red, style=plot.style_linebr, linewidth=2)
-plot(strategy.position_size != 0 and useTP ? activeTP : na, "Take Profit", color=color.green, style=plot.style_linebr, linewidth=2)
+tradeIsWinning = false
+if strategy.position_size > 0
+    tradeIsWinning := close > strategy.position_avg_price
+else if strategy.position_size < 0
+    tradeIsWinning := close < strategy.position_avg_price
+
+slColor = tradeIsWinning ? color.green : color.red
+plot(strategy.position_size != 0 and useSL ? activeSL : na, "SL/TP Dinámico Activo", color=slColor, style=plot.style_linebr, linewidth=3)
+
+// Dibujar formas visuales en el gráfico al activarse los gatillos
+plotshape(triggerLong, title="Gatillo Compra", style=shape.triangleup, location=location.belowbar, color=color.green, size=size.small)
+plotshape(triggerShort, title="Gatillo Venta", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small)
+
+// --- DIBUJO DE ESTRUCTURA DE MERCADO (HH, LH, HL, LL) ---
+ph = ta.pivothigh(high, pivotRadius, pivotRadius)
+pl = ta.pivotlow(low, pivotRadius, pivotRadius)
+
+var float lastPH = na
+var float lastPL = na
+
+if not na(ph)
+    isHH = na(lastPH) or (ph > lastPH)
+    lblText = isHH ? "HH" : "LH"
+    lblColor = isHH ? color.green : color.red
+    label.new(bar_index - pivotRadius, high[pivotRadius], text=lblText, 
+              color=color.new(lblColor, 90), textcolor=lblColor, 
+              style=label.style_label_down, size=size.small)
+    lastPH := ph
+
+if not na(pl)
+    isHL = na(lastPL) or (pl > lastPL)
+    lblText = isHL ? "HL" : "LL"
+    lblColor = isHL ? color.green : color.red
+    label.new(bar_index - pivotRadius, low[pivotRadius], text=lblText, 
+              color=color.new(lblColor, 90), textcolor=lblColor, 
+              style=label.style_label_up, size=size.small)
+    lastPL := pl
 
 // Crear tabla de estadísticas informativa (Dashboard)
-var table mainTable = table.new(position.top_right, 2, 9, bgcolor=color.new(color.white, 15), border_width=1, border_color=color.black)
+var table mainTable = table.new(position.top_right, 2, 13, bgcolor=color.new(color.white, 15), border_width=1, border_color=color.black)
 
 if barstate.islast
     inTrade    = strategy.position_size != 0
     atrDisplay = str.tostring(atrVal, "#.##") + " USD"
+    angleDisplay = str.tostring(emaAngle, "#.#") + "°"
+    angleColor = not usarPendiente ? color.gray : (emaAngle >= pendienteMin) ? color.green : (emaAngle <= -pendienteMin) ? color.red : color.orange
     profileName = isGold ? "ORO (Auto)" : isSilver ? "PLATA (Auto)" : isBitcoin ? "BTC (Auto)" : isNasdaq ? "NASDAQ (Auto)" : "MANUAL"
     tfSugerido  = isGold ? "15min" : isSilver ? "30min" : isBitcoin ? "30min" : isNasdaq ? "5min" : "-"
     displayTF   = resolvedTF == "240" ? "4h" : resolvedTF == "60" ? "1h" : resolvedTF == "30" ? "30m" : resolvedTF == "1440" ? "1d" : resolvedTF
     imacdStatus = not useIMACD ? "DESACTIVADO" : md == 0.0 ? "RANGO" : md > 0.0 ? "ALCISTA" : "BAJISTA"
-    imacdColor  = not useIMACD ? color.gray   : md == 0.0 ? color.orange : md > 0.0 ? color.green : color.red
+    imacdCol  = not useIMACD ? color.gray   : md == 0.0 ? color.orange : md > 0.0 ? color.green : color.red
 
     table.cell(mainTable, 0, 0, "Estrategia:",  text_color=color.black,  text_size=size.small)
     table.cell(mainTable, 1, 0, "HaEmaMultiV2",  text_color=color.black, text_size=size.small)
@@ -539,10 +626,34 @@ if barstate.islast
     table.cell(mainTable, 0, 5, "TF EMAs:",       text_color=color.black, text_size=size.small)
     table.cell(mainTable, 1, 5, displayTF,       text_color=color.orange, text_size=size.small)
     table.cell(mainTable, 0, 6, "iMACD:",        text_color=color.black, text_size=size.small)
-    table.cell(mainTable, 1, 6, imacdStatus,    text_color=imacdColor, text_size=size.small)
+    table.cell(mainTable, 1, 6, imacdStatus,    text_color=imacdCol, text_size=size.small)
     table.cell(mainTable, 0, 7, "Equidad:",      text_color=color.black, text_size=size.small)
     table.cell(mainTable, 1, 7, "$" + str.tostring(strategy.equity, "#.##"), text_color=color.green, text_size=size.small)
     table.cell(mainTable, 0, 8, "Net Profit:",   text_color=color.black, text_size=size.small)
     table.cell(mainTable, 1, 8, str.tostring(strategy.netprofit, "#.##") + " USD", text_color=strategy.netprofit >= 0 ? color.green : color.red, text_size=size.small)
+    
+    // Fila 10: ADX
+    adxDisplay = not inpUseADX ? "DESACTIVADO" : str.tostring(adxVal, "#.#") + (adxOk ? " (Tendencia)" : " (Rango)")
+    adxColor = not inpUseADX ? color.gray : adxOk ? color.green : color.red
+    table.cell(mainTable, 0, 9, "ADX (" + str.tostring(inpAdxLen) + "):", text_color=color.black, text_size=size.small)
+    table.cell(mainTable, 1, 9, adxDisplay,     text_color=adxColor, text_size=size.small)
 
+    // Fila 11, 12 y 13
+    table.cell(mainTable, 0, 10, "Ángulo EMA Lenta:", text_color=color.black, text_size=size.small)
+    table.cell(mainTable, 1, 10, angleDisplay,    text_color=angleColor, text_size=size.small)
+    
+    table.cell(mainTable, 0, 11, "Riesgo Max:", text_color=color.black, text_size=size.small)
+    table.cell(mainTable, 1, 11, "$" + str.tostring(riskAmount, "#.##"), text_color=color.orange, text_size=size.small)
+    table.cell(mainTable, 0, 12, "Lotes (Qty):", text_color=color.black, text_size=size.small)
+    table.cell(mainTable, 1, 12, str.tostring(qty, "#.##"), text_color=color.blue, text_size=size.small)
 
+// ════════════════════════════════════════════════════════════════════
+// PLOTS INVISIBLES PARA VENTANA DE DATOS (DATA WINDOW)
+// ════════════════════════════════════════════════════════════════════
+plot(emaAngle, title="Ángulo EMA Lenta", color=color.new(color.blue, 100), display=display.data_window)
+
+// PLOTS DE DIAGNÓSTICO
+plotchar(strongBear, title="Dbg: Vela Fuerte Oso", char="", display=display.data_window)
+plotchar(adxOk, title="Dbg: ADX Permitido", char="", display=display.data_window)
+plotchar(imacdOk, title="Dbg: iMACD Permitido", char="", display=display.data_window)
+plotchar(signalActual == "Venta", title="Dbg: Señal Activa = Venta", char="", display=display.data_window)

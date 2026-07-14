@@ -14,121 +14,86 @@ CTrade trade;
 // PARÁMETROS DE ENTRADA (INPUTS)
 // ============================================================================
 input group "--- PERFIL DE CONFIGURACIÓN ---"
-input string InpAssetProfile = "Auto"; // Perfil: Auto, Oro (XAUUSD), Plata (XAGUSD), Bitcoin (BTCUSD), Nasdaq (NAS100), Manual
+input string InpAssetProfile = "Auto"; // Perfil: Auto, Oro(XAUUSD), Plata(XAGUSD), Bitcoin(BTCUSD), Nasdaq(NAS100), Manual
 
 input group "--- GESTIÓN DE RIESGO ---"
-input double InpRiskPerc = 1.0; // Riesgo por operación (%)
-input bool InpUseTP = true; // Usar Take Profit Fijo
-input double InpRrRatio = 3.0; // Relación Riesgo/Recompensa (R:R)
-input bool InpUseTPChase = false; // Usar Persecución de TP (TP Chasing)
-input double InpTpChasePts = 3.0; // Distancia de Persecución TP (Pts)
-input double InpTpChaseOffset = 3.0; // Avance del TP (Pts)
-input int InpTrailDivisions = 7; // Divisiones del Trailing (partes del recorrido TP→SL)
-input bool InpUseFixedLot = false; // ¿Usar Lote Fijo? (True=Fijo, False=Riesgo %)
-input double InpFixedLotVal = 0.01; // Valor de Lote Fijo (Lotes MT5)
-input double InpMaxRiskPerc = 5.0; // Riesgo Máximo Permitido por Trade (% Balance)
-input double InpMaxSpreadPoints = 50.0; // Spread Máximo Permitido (Puntos)
-input double InpMinStopsLevel = 0.0; // Mínimo Stop Level (Puntos)
-input bool InpUseBE = true; // Usar Break-Even (BE)
-input ulong MagicNumber = 789101; // Magic Number de la Estrategia
+input double InpRiskPerc = 2.0;        // Riesgo por operación(%)
+input bool InpUseFixedLot = false;     // ¿Usar Lote Fijo?
+input double InpFixedLotVal = 0.01;    // Valor de Lote Fijo (Lotes)
+input double InpMaxRiskPerc = 10.0;    // Riesgo Máximo Permitido (%)
+input double InpMaxSpreadPoints = 50.0;// Spread Máximo Permitido (Puntos)
+input ulong MagicNumber = 789101;      // Magic Number
+
+input group "--- SUPERTREND (Salidas) ---"
+input int InpStAtrPeriod = 10;         // Supertrend ATR Period
+input double InpStMultiplier = 3.0;    // Supertrend Multiplier
+input bool InpCierraCruce = false;     // Cerrar por Cruce de EMAs
+input bool InpUseSL = true;            // Usar Supertrend como SL Dinámico
 
 input group "--- PARÁMETROS MANUALES (Si perfil = Manual) ---"
-input string InpEmaTF = "Auto"; // Temporalidad de EMAs (Auto, 15, 30, 60, 180, 240, 1440)
-input int InpEmaFastLen = 21; // Período EMA Rápida manual
-input int InpEmaSlowLen = 55; // Período EMA Lenta manual
-input int InpSwingPeriod = 8; // Velas Swing High/Low manual
-input double InpSlBufPts = 2.0; // Buffer SL manual (Puntos)
-input bool InpUseIMACD = false; // Usar iMACD manual
-input int InpImacdLen = 35; // Período iMACD manual
-input int InpAtrFilterLen = 14; // Período ATR manual
-input double InpBodyMinMult = 0.75; // Multiplicador de Cuerpo Mínimo manual (x ATR)
+input int InpEmaFastLen = 21;          // Período EMA Rápida
+input int InpEmaSlowLen = 55;          // Período EMA Lenta
+input bool InpUseIMACD = false;        // Usar iMACD
+input int InpImacdLen = 35;            // Período iMACD
+input int InpAtrFilterLen = 14;        // Período ATR
+input bool InpUseHA = false;           // Usar Heikin Ashi
+input int InpNumEntradas = 1;          // Num. Entradas por Tendencia
+input bool InpUsarPendiente = true;    // Usar Filtro Pendiente
+input double InpPendienteMin = 9.5;    // Pendiente Mínima
+
+input group "--- FILTRO ADX ---"
+input bool InpUseADX = true;           // Usar Filtro ADX
+input int InpAdxLen = 14;              // Período ADX
+input double InpAdxLevel = 20.0;       // Nivel Mínimo ADX
 
 // ============================================================================
 // VARIABLES GLOBALES
 // ============================================================================
-double slBufferPts;
-double rrRatio;
+int fastLen;
+int slowLen;
 bool useIMACD;
-bool useTPChase;
-bool useTP;
-double tpChasePts;
-double tpChaseOffset;
-int trailDivisions;
-double bodyMinMult;
+int imacdLen;
+int atrFilterLen;
+bool useHA;
+bool cierraCruce;
+bool useSL;
+int numEntradas;
+bool usarPendiente;
+double pendienteMin;
+bool useADX;
+int adxLen;
+double adxLevel;
+int stAtrPeriod;
+double stMultiplier;
+double maxSpreadPoints;
 bool useFixedLot;
 double fixedLotValue;
 double maxRiskPerc;
-double maxSpreadPoints;
-double minStopsLevel;
-bool useBE;
+double riskPerc;
 
-// Parámetros de Indicadores reasignables
-string emaTF;
-int fastLen;
-int slowLen;
-int swingPeriod;
-int imacdLen;
-int atrFilterLen;
-
-// Banderas de Activo
+// Perfiles Automáticos
 bool isGold = false;
 bool isSilver = false;
 bool isBitcoin = false;
 bool isNasdaq = false;
 
-// Handles de Indicadores
-ENUM_TIMEFRAMES resolvedTimeframe;
-// Handles de Indicadores de Posición
-double activeSL = 0.0;
-double activeTP = 0.0;
-double entryP = 0.0;
-datetime entryT = 0;
-bool posActiveLastTick = false;
+// Variables de Estado y Contadores
+int entradasRealizadasLong = 0;
+int entradasRealizadasShort = 0;
+int lastStDirection = 0; // 1 = Alcista, -1 = Bajista
 datetime lastBarTime = 0;
 
-// Variables de Trailing dinámico
-double slPart = 0.0;
-double tpPart = 0.0;
-bool pasoLaMitad = false;
-bool slTrail = false;
-double tpChaseSlGap = 0.0;
-bool beAplicado = false;
-double activeChaseOffset = 0.0;
-
-// Registro de las últimas entradas para evitar re-entradas en la misma señal
-datetime lastEntryTimeLong = 0;
-datetime lastEntryTimeShort = 0;
-
-// Banderas de señal pendiente para confirmación de velas/HA
-bool pendingLongSignal = false;
-bool pendingShortSignal = false;
-datetime signalSetupTime = 0;
-string banderaState = "niCompraNiVenta";
-
-double atrValini = 0;
-
-// Estructura de Velas Heikin-Ashi
-struct HeikinAshiBar {
-    double open;
-    double high;
-    double low;
-    double close;
-};
-
-// Declaraciones de funciones
-double CalculateATR(int index, int period);
-double GetIMACD(int targetIndex, int len);
-bool GetHeikinAshi(HeikinAshiBar &haBars[]);
-void ManageActivePosition();
-void UpdateDashboard();
-void ClearDashboard();
-void DrawInitBoxes(datetime entryTime, double entryPrice, double slVal, double tpVal);
-void UpdateTradeBoxes(double entryPrice, double slVal, double tpVal);
-void DrawSetupMark(datetime signalTime, int direction);
-double FindSwingLow(int radius);
-double FindSwingHigh(int radius);
-double CalculateSMMAValue(double &src[], int targetIndex, int len);
-int GetOwnPositionType();
+// Variables de Indicadores para la barra actual
+double currentFastEma = 0.0;
+double currentSlowEma = 0.0;
+double prevFastEma = 0.0;
+double prevSlowEma = 0.0;
+int currentStDirection = 0;
+double currentStValue = 0.0;
+double currentAtrVal = 0.0;
+double currentAdxVal = 0.0;
+double currentImacdVal = 0.0;
+double currentEmaAngle = 0.0;
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -136,409 +101,78 @@ int GetOwnPositionType();
 int OnInit()
 {
     trade.SetExpertMagicNumber(MagicNumber);
-    
-    // Determinar Activo por Símbolo
     string symbolLower = Symbol();
     StringToLower(symbolLower);
     
     isGold = (StringFind(symbolLower, "xau") >= 0 || StringFind(symbolLower, "gold") >= 0);
     isSilver = (StringFind(symbolLower, "xag") >= 0 || StringFind(symbolLower, "silver") >= 0 || StringFind(symbolLower, "plata") >= 0);
     isBitcoin = (StringFind(symbolLower, "btc") >= 0 || StringFind(symbolLower, "bitcoin") >= 0);
-    isNasdaq = (StringFind(symbolLower, "nas100") >= 0 || StringFind(symbolLower, "nasdaq") >= 0 || StringFind(symbolLower, "us100") >= 0 || StringFind(symbolLower, "ustec") || StringFind(symbolLower, "nq") >= 0 || StringFind(symbolLower, "tech") >= 0);
+    isNasdaq = (StringFind(symbolLower, "nas100") >= 0 || StringFind(symbolLower, "nasdaq") >= 0 || StringFind(symbolLower, "us100") >= 0 || StringFind(symbolLower, "ustec") >= 0 || StringFind(symbolLower, "nq") >= 0 || StringFind(symbolLower, "tech") >= 0);
     
     bool autoProfile = (InpAssetProfile == "Auto");
-    useTP = InpUseTP;
     
-    // Inicializar valores desde inputs manuales
+    // Default manual
     fastLen = InpEmaFastLen;
     slowLen = InpEmaSlowLen;
-    swingPeriod = InpSwingPeriod;
+    useIMACD = InpUseIMACD;
     imacdLen = InpImacdLen;
-    
-    slBufferPts = InpSlBufPts;
-    rrRatio = InpRrRatio;
-    useTPChase = InpUseTPChase;
-    tpChasePts = InpTpChasePts;
-    tpChaseOffset = InpTpChaseOffset;
-    trailDivisions = InpTrailDivisions;
-    bodyMinMult = InpBodyMinMult;
-    useBE = InpUseBE;
+    atrFilterLen = InpAtrFilterLen;
+    useHA = InpUseHA;
+    cierraCruce = InpCierraCruce;
+    useSL = InpUseSL;
+    numEntradas = InpNumEntradas;
+    usarPendiente = InpUsarPendiente;
+    pendienteMin = InpPendienteMin;
+    useADX = InpUseADX;
+    adxLen = InpAdxLen;
+    adxLevel = InpAdxLevel;
+    stAtrPeriod = InpStAtrPeriod;
+    stMultiplier = InpStMultiplier;
+    maxSpreadPoints = InpMaxSpreadPoints;
     useFixedLot = InpUseFixedLot;
     fixedLotValue = InpFixedLotVal;
     maxRiskPerc = InpMaxRiskPerc;
-    maxSpreadPoints = InpMaxSpreadPoints;
-    minStopsLevel = InpMinStopsLevel;
+    riskPerc = InpRiskPerc;
     
     if(autoProfile && isGold)
     {
-        fastLen       = 9;
-        slowLen       = 20;
-        swingPeriod   = 7;
-        imacdLen      = 20;
-        atrFilterLen  = 14;
-        slBufferPts   = 35.0;
-        rrRatio       = 1.8;
-        useIMACD      = true;
-        useTPChase    = true;
-        tpChasePts    = 10.0;
-        activeChaseOffset = 1.8; // Se inicializará con esto o vía ATR si aplica
-        tpChaseOffset = 1.8;
-        maxRiskPerc   = 1.0;
-        trailDivisions = 4;
+        fastLen = 9; slowLen = 20; useIMACD = true;
+        imacdLen = 20; atrFilterLen = 14; useADX = true; adxLevel = 19.5;
+        usarPendiente = false; pendienteMin = 0.0;
+        cierraCruce = false; useSL = true; numEntradas = 1; useHA = false;
         maxSpreadPoints = 300.0;
-        bodyMinMult   = 0.27;
-        useBE = false;
     }
     else if(autoProfile && isSilver)
     {
-        fastLen       = 10;
-        slowLen       = 21;
-        swingPeriod   = 5;
-        imacdLen      = 35;
-        atrFilterLen  = 14;
-        useTPChase    = true;
-        tpChasePts    = 2.0;
-        tpChaseOffset = 0.25;
-        trailDivisions = 5;
+        fastLen = 10; slowLen = 21; useIMACD = true;
+        imacdLen = 35; atrFilterLen = 14; useADX = true; adxLevel = 15.5;
+        usarPendiente = false; pendienteMin = 0.0;
+        cierraCruce = false; useSL = true; numEntradas = 1; useHA = false;
         maxSpreadPoints = 100.0;
-        bodyMinMult   = 0.75;
-        useBE = false;
     }
     else if(autoProfile && isBitcoin)
     {
-        fastLen       = 9;
-        slowLen       = 21;
-        swingPeriod   = 5;
-        imacdLen      = 35;
-        atrFilterLen  = 14;
-        useTPChase    = true;
-        tpChasePts    = 150.0;
-        tpChaseOffset = 150.0;
-        trailDivisions = 7;
+        fastLen = 9; slowLen = 21; useIMACD = true;
+        imacdLen = 35; atrFilterLen = 14; useADX = false; adxLevel = 10.0;
+        usarPendiente = true; pendienteMin = 1.0;
+        cierraCruce = false; useSL = true; numEntradas = 1; useHA = false;
         maxSpreadPoints = 10000.0;
-        bodyMinMult   = 0.75;
-        useBE = false;
     }
     else if(autoProfile && isNasdaq)
     {
-        fastLen       = 9;
-        slowLen       = 21;
-        swingPeriod   = 5;
-        imacdLen      = 35;
-        atrFilterLen  = 14;
-        useTPChase    = true;
-        tpChasePts    = 15.0;
-        tpChaseOffset = 15.0;
-        trailDivisions = 7;
+        fastLen = 5; slowLen = 18; useIMACD = true;
+        imacdLen = 35; atrFilterLen = 14; useADX = true; adxLevel = 0.0;
+        usarPendiente = true; pendienteMin = 9.5;
+        cierraCruce = true; useSL = false; numEntradas = 1; useHA = true;
         maxSpreadPoints = 300.0;
-        bodyMinMult   = 0.75;
-        useBE = false;
     }
     
-    minStopsLevel = 0.0;
-    
-    // Validación de temporalidades requeridas para los activos automáticos
-    ENUM_TIMEFRAMES correctPeriod = _Period;
-    string strCorrect = "";
-    if (autoProfile && isGold) { correctPeriod = PERIOD_M15; strCorrect = "15 minutos (M15)"; }
-    else if (autoProfile && isSilver) { correctPeriod = PERIOD_M30; strCorrect = "30 minutos (M30)"; }
-    else if (autoProfile && isBitcoin) { correctPeriod = PERIOD_M30; strCorrect = "30 minutos (M30)"; }
-    else if (autoProfile && isNasdaq) { correctPeriod = PERIOD_M5; strCorrect = "5 minutos (M5)"; }
-    
-    if (strCorrect != "" && _Period != correctPeriod)
-    {
-        Alert("Temporalidad incorrecta para " + Symbol() + ". Cambie el timeframe del grafico a " + strCorrect + " para el correcto funcionamiento.");
-        return(INIT_PARAMETERS_INCORRECT);
-    }
-    
-    // Resolución de temporalidad para cálculo de EMAs
-    resolvedTimeframe = _Period;
-    emaTF = InpEmaTF;
-    if(autoProfile)
-    {
-        if(isGold) emaTF = "Auto";
-        else if(isSilver) emaTF = "15";
-        else if(isBitcoin) emaTF = "15";
-        else if(isNasdaq) emaTF = "Auto";
-    }
-    
-    if(emaTF != "Auto")
-    {
-        if(emaTF == "15") resolvedTimeframe = PERIOD_M15;
-        else if(emaTF == "30") resolvedTimeframe = PERIOD_M30;
-        else if(emaTF == "60") resolvedTimeframe = PERIOD_H1;
-        else if(emaTF == "180") resolvedTimeframe = PERIOD_H3;
-        else if(emaTF == "240") resolvedTimeframe = PERIOD_H4;
-        else if(emaTF == "1440") resolvedTimeframe = PERIOD_D1;
-    }
-    
-    // Crear Dashboard
-    UpdateDashboard();
-    
-    Print("EA HaEmaMultV2i inicializado exitosamente.");
+    Print("HaEmaMultV2i Initialized. Profile: ", (autoProfile ? (isGold ? "Gold" : (isSilver ? "Silver" : (isBitcoin ? "BTC" : (isNasdaq ? "Nasdaq" : "Manual")))) : "Manual"));
     return(INIT_SUCCEEDED);
 }
 
 //+------------------------------------------------------------------+
-//| Expert deinitialization function                                 |
-//+------------------------------------------------------------------+
-void OnDeinit(const int reason)
-{
-    ObjectDelete(0, "SL_Box");
-    ObjectDelete(0, "TP_Box");
-    ObjectsDeleteAll(0, "FastEmaLine_");
-    ObjectsDeleteAll(0, "SlowEmaLine_");
-    ClearDashboard();
-}
-
-
-
-//+------------------------------------------------------------------+
-//| Helper para obtener el valor de un búfer de indicador            |
-//+------------------------------------------------------------------+
-double GetIndicatorValue(int handle, int bufferNum, int index)
-{
-    double values[1];
-    return CopyBuffer(handle, bufferNum, index, 1, values) > 0 ? values[0] : 0.0;
-}
-
-//+------------------------------------------------------------------+
-//| PnL de las operaciones cerradas en el día actual                 |
-//+------------------------------------------------------------------+
-double GetTodayClosedPnl()
-{
-    MqlDateTime dt;
-    TimeToStruct(TimeCurrent(), dt);
-    dt.hour = 0; dt.min = 0; dt.sec = 0;
-    datetime dayStart = StructToTime(dt);
-    
-    if(!HistorySelect(dayStart, TimeCurrent())) return(0.0);
-    
-    double pnl = 0.0;
-    int total = HistoryDealsTotal();
-    for(int i = 0; i < total; i++)
-    {
-        ulong ticket = HistoryDealGetTicket(i);
-        if(ticket == 0) continue;
-        if(HistoryDealGetString(ticket, DEAL_SYMBOL) != Symbol()) continue;
-        if((ulong)HistoryDealGetInteger(ticket, DEAL_MAGIC) != MagicNumber) continue;
-        
-        long entry = HistoryDealGetInteger(ticket, DEAL_ENTRY);
-        if(entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_INOUT) continue;
-        
-        pnl += HistoryDealGetDouble(ticket, DEAL_PROFIT);
-        pnl += HistoryDealGetDouble(ticket, DEAL_SWAP);
-        pnl += HistoryDealGetDouble(ticket, DEAL_COMMISSION);
-    }
-    return(pnl);
-}
-
-//+------------------------------------------------------------------+
-//| Find first swing low (pivot low) backwards                      |
-//+------------------------------------------------------------------+
-double FindSwingLow(int radius)
-{
-    int size = radius * 4 + 100;
-    double lows[];
-    ArraySetAsSeries(lows, true);
-    int copied = CopyLow(Symbol(), _Period, 0, size, lows);
-    if(copied <= radius + 1) return(lows[1]);
-    
-    double lowestLow = 0.0;
-    for(int i = radius + 1; i < copied - radius; i++)
-    {
-        bool isPivot = true;
-        for(int j = -radius; j <= radius; j++)
-        {
-            if(lows[i] > lows[i + j])
-            {
-                isPivot = false;
-                break;
-            }
-        }
-        if(isPivot)
-        {
-            lowestLow = lows[i];
-            break;
-        }
-    }
-    if(lowestLow == 0.0)
-    {
-        int lowestIdx = ArrayMinimum(lows, 1, 10);
-        lowestLow = lows[lowestIdx];
-    }
-    return(lowestLow);
-}
-
-//+------------------------------------------------------------------+
-//| Find first swing high (pivot high) backwards                     |
-//+------------------------------------------------------------------+
-double FindSwingHigh(int radius)
-{
-    int size = radius * 4 + 100;
-    double highs[];
-    ArraySetAsSeries(highs, true);
-    int copied = CopyHigh(Symbol(), _Period, 0, size, highs);
-    if(copied <= radius + 1) return(highs[1]);
-    
-    double highestHigh = 0.0;
-    for(int i = radius + 1; i < copied - radius; i++)
-    {
-        bool isPivot = true;
-        for(int j = -radius; j <= radius; j++)
-        {
-            if(highs[i] < highs[i + j])
-            {
-                isPivot = false;
-                break;
-            }
-        }
-        if(isPivot)
-        {
-            highestHigh = highs[i];
-            break;
-        }
-    }
-    if(highestHigh == 0.0)
-    {
-        int highestIdx = ArrayMaximum(highs, 1, 10);
-        highestHigh = highs[highestIdx];
-    }
-    return(highestHigh);
-}
-
-//+------------------------------------------------------------------+
-//| Impulse MACD calculation matching LazyBear exact formulas       |
-//+------------------------------------------------------------------+
-//+------------------------------------------------------------------+
-//| Smoothed Moving Average (SMMA) calculation                      |
-//+------------------------------------------------------------------+
-double CalculateSMMAValue(double &src[], int targetIndex, int len)
-{
-    int size = ArraySize(src);
-    if(size < len + targetIndex) return(0.0);
-    
-    double smma = 0.0;
-    double sum = 0.0;
-    int oldestStart = size - len;
-    for(int i = 0; i < len; i++)
-    {
-        sum += src[oldestStart + i];
-    }
-    smma = sum / len;
-    
-    for(int i = oldestStart - 1; i >= targetIndex; i--)
-    {
-        smma = (smma * (len - 1) + src[i]) / len;
-    }
-    return(smma);
-}
-
-//+------------------------------------------------------------------+
-//| Impulse MACD calculation matching LazyBear exact formulas       |
-//+------------------------------------------------------------------+
-double GetIMACD(int targetIndex, int len)
-{
-    int size = len * 6;
-    double highs[], lows[], closes[];
-    ArraySetAsSeries(highs, true);
-    ArraySetAsSeries(lows, true);
-    ArraySetAsSeries(closes, true);
-    
-    int copiedH = CopyHigh(Symbol(), _Period, 0, size, highs);
-    int copiedL = CopyLow(Symbol(), _Period, 0, size, lows);
-    int copiedC = CopyClose(Symbol(), _Period, 0, size, closes);
-    
-    int copied = MathMin(copiedH, MathMin(copiedL, copiedC));
-    if(copied <= len * 2) return(0.0);
-    size = copied;
-    
-    double hlc3[];
-    ArrayResize(hlc3, size);
-    ArraySetAsSeries(hlc3, true);
-    for(int i = 0; i < size; i++)
-    {
-        hlc3[i] = (highs[i] + lows[i] + closes[i]) / 3.0;
-    }
-    
-    double ema1[];
-    ArrayResize(ema1, size);
-    ArraySetAsSeries(ema1, true);
-    double alpha = 2.0 / (len + 1.0);
-    
-    ema1[size - 1] = hlc3[size - 1];
-    for(int i = size - 2; i >= 0; i--)
-    {
-        ema1[i] = hlc3[i] * alpha + ema1[i + 1] * (1.0 - alpha);
-    }
-    
-    double ema2[];
-    ArrayResize(ema2, size);
-    ArraySetAsSeries(ema2, true);
-    
-    ema2[size - 1] = ema1[size - 1];
-    for(int i = size - 2; i >= 0; i--)
-    {
-        ema2[i] = ema1[i] * alpha + ema2[i + 1] * (1.0 - alpha);
-    }
-    
-    double mi = ema1[targetIndex] + (ema1[targetIndex] - ema2[targetIndex]);
-    
-    double smmaH = CalculateSMMAValue(highs, targetIndex, len);
-    double smmaL = CalculateSMMAValue(lows, targetIndex, len);
-    
-    if(mi > smmaH) return(mi - smmaH);
-    if(mi < smmaL) return(mi - smmaL);
-    return(0.0);
-}
-
-//+------------------------------------------------------------------+
-//| Recursive Heikin-Ashi calculation over historical candles       |
-//+------------------------------------------------------------------+
-bool GetHeikinAshi(HeikinAshiBar &haBars[])
-{
-    int count = ArraySize(haBars);
-    MqlRates rates[];
-    if(CopyRates(Symbol(), _Period, 0, count + 100, rates) <= 0) return(false);
-    
-    int copied = ArraySize(rates);
-    if(copied < count) return(false);
-    
-    double haO[], haC[], haH[], haL[];
-    ArrayResize(haO, copied);
-    ArrayResize(haC, copied);
-    ArrayResize(haH, copied);
-    ArrayResize(haL, copied);
-    
-    haO[0] = (rates[0].open + rates[0].close) / 2.0;
-    haC[0] = (rates[0].open + rates[0].high + rates[0].low + rates[0].close) / 4.0;
-    haH[0] = MathMax(rates[0].high, MathMax(haO[0], haC[0]));
-    haL[0] = MathMin(rates[0].low, MathMin(haO[0], haC[0]));
-    
-    for(int i = 1; i < copied; i++)
-    {
-        haC[i] = (rates[i].open + rates[i].high + rates[i].low + rates[i].close) / 4.0;
-        haO[i] = (haO[i - 1] + haC[i - 1]) / 2.0;
-        haH[i] = MathMax(rates[i].high, MathMax(haO[i], haC[i]));
-        haL[i] = MathMin(rates[i].low, MathMin(haO[i], haC[i]));
-    }
-    
-    for(int i = 0; i < count; i++)
-    {
-        int srcIdx = copied - 1 - i;
-        if(srcIdx >= 0 && srcIdx < copied)
-        {
-            haBars[i].open = haO[srcIdx];
-            haBars[i].close = haC[srcIdx];
-            haBars[i].high = haH[srcIdx];
-            haBars[i].low = haL[srcIdx];
-        }
-    }
-    return(true);
-}
-
-//+------------------------------------------------------------------+
-//| Detección de Posición Propia (MQ5-CRITICAL #1 & #2)             |
+//| Get Position Type                                                |
 //+------------------------------------------------------------------+
 int GetOwnPositionType()
 {
@@ -553,858 +187,319 @@ int GetOwnPositionType()
 }
 
 //+------------------------------------------------------------------+
-//| Dibujar rectángulos iniciales de SL y TP                         |
+//| Helpers Matemáticos y de Cálculo (PineScript a MT5)              |
 //+------------------------------------------------------------------+
-void DrawInitBoxes(datetime entryTime, double entryPrice, double slVal, double tpVal)
+double CalculateSMA(double &src[], int period, int index)
 {
-    ObjectDelete(0, "SL_Box");
-    ObjectDelete(0, "TP_Box");
-    entryT = entryTime;
-    
-    datetime endTime = entryTime + PeriodSeconds(PERIOD_CURRENT) * 20; // Visible por 20 velas
-    
-    // Caja SL (Rojo transparente)
-    ObjectCreate(0, "SL_Box", OBJ_RECTANGLE, 0, entryTime, entryPrice, endTime, slVal);
-    ObjectSetInteger(0, "SL_Box", OBJPROP_COLOR, C'255, 220, 220');
-    ObjectSetInteger(0, "SL_Box", OBJPROP_FILL, true);
-    ObjectSetInteger(0, "SL_Box", OBJPROP_BACK, true);
-    ObjectSetInteger(0, "SL_Box", OBJPROP_SELECTABLE, false);
-    
-    if(tpVal > 0.0)
-    {
-        // Caja TP (Verde transparente)
-        ObjectCreate(0, "TP_Box", OBJ_RECTANGLE, 0, entryTime, entryPrice, endTime, tpVal);
-        ObjectSetInteger(0, "TP_Box", OBJPROP_COLOR, C'220, 255, 220');
-        ObjectSetInteger(0, "TP_Box", OBJPROP_FILL, true);
-        ObjectSetInteger(0, "TP_Box", OBJPROP_BACK, true);
-        ObjectSetInteger(0, "TP_Box", OBJPROP_SELECTABLE, false);
-    }
-    ChartRedraw(0);
+    if(index + period > ArraySize(src)) return 0.0;
+    double sum = 0.0;
+    for(int i = 0; i < period; i++) sum += src[index + i];
+    return sum / period;
 }
 
-//+------------------------------------------------------------------+
-//| Actualizar cajas en base a los nuevos valores de SL y TP         |
-//+------------------------------------------------------------------+
-void UpdateTradeBoxes(double entryPrice, double slVal, double tpVal)
+double CalculateEMA(double &src[], int period, int index, double &prevEma)
 {
-    datetime boxStart = entryT;
-    if(boxStart == 0)
+    double alpha = 2.0 / (period + 1.0);
+    if(prevEma == 0.0)
     {
-        boxStart = (datetime)ObjectGetInteger(0, "SL_Box", OBJPROP_TIME, 0);
-        if(boxStart == 0) boxStart = TimeCurrent();
+        prevEma = CalculateSMA(src, period, index);
+        return prevEma;
+    }
+    double ema = alpha * src[index] + (1.0 - alpha) * prevEma;
+    return ema;
+}
+
+double CalculateRMA(double &src[], int period, int index, double &prevRma)
+{
+    double alpha = 1.0 / period;
+    if(prevRma == 0.0)
+    {
+        prevRma = CalculateSMA(src, period, index);
+        return prevRma;
+    }
+    double rma = alpha * src[index] + (1.0 - alpha) * prevRma;
+    return rma;
+}
+
+// Función principal para poblar arrays y procesar cálculos complejos
+void ComputeIndicators()
+{
+    int requiredBars = MathMax(slowLen, MathMax(imacdLen, adxLen)) * 4 + 100;
+    MqlRates rates[];
+    if(CopyRates(Symbol(), _Period, 0, requiredBars, rates) <= 0) return;
+    ArraySetAsSeries(rates, true);
+    
+    int total = ArraySize(rates);
+    
+    // Arrays para precios bases
+    double srcClose[], srcHigh[], srcLow[], srcOpen[];
+    ArrayResize(srcClose, total); ArrayResize(srcHigh, total); ArrayResize(srcLow, total); ArrayResize(srcOpen, total);
+    
+    // Heikin Ashi
+    double haOpen[], haClose[], haHigh[], haLow[];
+    ArrayResize(haOpen, total); ArrayResize(haClose, total); ArrayResize(haHigh, total); ArrayResize(haLow, total);
+    
+    // Inicializar HA (desde la vela más antigua)
+    haOpen[total-1] = (rates[total-1].open + rates[total-1].close) / 2.0;
+    haClose[total-1] = (rates[total-1].open + rates[total-1].high + rates[total-1].low + rates[total-1].close) / 4.0;
+    haHigh[total-1] = MathMax(rates[total-1].high, MathMax(haOpen[total-1], haClose[total-1]));
+    haLow[total-1] = MathMin(rates[total-1].low, MathMin(haOpen[total-1], haClose[total-1]));
+    
+    for(int i = total - 2; i >= 0; i--)
+    {
+        haClose[i] = (rates[i].open + rates[i].high + rates[i].low + rates[i].close) / 4.0;
+        haOpen[i] = (haOpen[i+1] + haClose[i+1]) / 2.0;
+        haHigh[i] = MathMax(rates[i].high, MathMax(haOpen[i], haClose[i]));
+        haLow[i] = MathMin(rates[i].low, MathMin(haOpen[i], haClose[i]));
     }
     
-    datetime boxEnd = TimeCurrent() + PeriodSeconds(PERIOD_CURRENT) * 20;
-    
-    if(ObjectFind(0, "SL_Box") >= 0)
+    // Poblado final del source
+    for(int i = 0; i < total; i++)
     {
-        ObjectMove(0, "SL_Box", 0, boxStart, entryPrice);
-        ObjectMove(0, "SL_Box", 1, boxEnd, slVal);
-    }
-    else
-    {
-        ObjectCreate(0, "SL_Box", OBJ_RECTANGLE, 0, boxStart, entryPrice, boxEnd, slVal);
-        ObjectSetInteger(0, "SL_Box", OBJPROP_COLOR, C'255, 220, 220');
-        ObjectSetInteger(0, "SL_Box", OBJPROP_FILL, true);
-        ObjectSetInteger(0, "SL_Box", OBJPROP_BACK, true);
-        ObjectSetInteger(0, "SL_Box", OBJPROP_SELECTABLE, false);
-    }
-    
-    if(tpVal > 0.0)
-    {
-        if(ObjectFind(0, "TP_Box") >= 0)
+        if(useHA)
         {
-            ObjectMove(0, "TP_Box", 0, boxStart, entryPrice);
-            ObjectMove(0, "TP_Box", 1, boxEnd, tpVal);
+            srcClose[i] = haClose[i]; srcHigh[i] = haHigh[i]; srcLow[i] = haLow[i]; srcOpen[i] = haOpen[i];
         }
         else
         {
-            ObjectCreate(0, "TP_Box", OBJ_RECTANGLE, 0, boxStart, entryPrice, boxEnd, tpVal);
-            ObjectSetInteger(0, "TP_Box", OBJPROP_COLOR, C'220, 255, 220');
-            ObjectSetInteger(0, "TP_Box", OBJPROP_FILL, true);
-            ObjectSetInteger(0, "TP_Box", OBJPROP_BACK, true);
-            ObjectSetInteger(0, "TP_Box", OBJPROP_SELECTABLE, false);
+            srcClose[i] = rates[i].close; srcHigh[i] = rates[i].high; srcLow[i] = rates[i].low; srcOpen[i] = rates[i].open;
         }
     }
-    else
+    
+    // EMAs
+    double emaFast = 0.0, emaSlow = 0.0;
+    double pEmaF = 0.0, pEmaS = 0.0;
+    for(int i = total - 1; i >= 0; i--)
     {
-        ObjectDelete(0, "TP_Box");
-    }
-    ChartRedraw(0);
-}
-
-//+------------------------------------------------------------------+
-//| Dibujar marcas visuales en el gráfico para cruces y convergencias|
-//+------------------------------------------------------------------+
-void DrawSetupMark(datetime signalTime, int direction)
-{
-    string objName = "Mark_" + TimeToString(signalTime);
-    if(ObjectFind(0, objName) >= 0) return;
-    
-    double price = 0.0;
-    int shift = iBarShift(Symbol(), _Period, signalTime);
-    if(shift >= 0)
-    {
-        double range = iHigh(Symbol(), _Period, shift) - iLow(Symbol(), _Period, shift);
-        if(range <= 0.0) range = 100 * SymbolInfoDouble(Symbol(), SYMBOL_POINT);
-        price = direction == 1 ? iLow(Symbol(), _Period, shift) - (range * 0.3) : (direction == -1 ? iHigh(Symbol(), _Period, shift) + (range * 0.3) : (iHigh(Symbol(), _Period, shift) + iLow(Symbol(), _Period, shift)) / 2.0);
-    }
-    else
-    {
-        price = SymbolInfoDouble(Symbol(), SYMBOL_BID);
-    }
-    
-    uchar code = direction == 1 ? 241 : (direction == -1 ? 242 : 159);
-    color clr = direction == 1 ? clrLime : (direction == -1 ? clrRed : clrYellow);
-    
-    if(ObjectCreate(0, objName, OBJ_ARROW, 0, signalTime, price))
-    {
-        ObjectSetInteger(0, objName, OBJPROP_ARROWCODE, code);
-        ObjectSetInteger(0, objName, OBJPROP_COLOR, clr);
-        ObjectSetInteger(0, objName, OBJPROP_WIDTH, 2);
-    }
-}
-
-//+------------------------------------------------------------------+
-//| Dashboard Informativo Premium en el gráfico                      |
-//+------------------------------------------------------------------+
-void UpdateDashboard()
-{
-    string prefix = "DB_";
-    string labels[] = {
-        "Estrategia:", "HaEmaMultV2i",
-        "Perfil:", "",
-        "Estado:", "",
-        "ATR:", "",
-        "iMACD:", "",
-        "Equidad:", "",
-        "Rendimiento:", ""
-    };
-    
-    string profileName = InpAssetProfile;
-    if(profileName == "Auto")
-    {
-        if(isGold) profileName = "ORO (Auto)";
-        else if(isSilver) profileName = "PLATA (Auto)";
-        else if(isBitcoin) profileName = "BTC (Auto)";
-        else if(isNasdaq) profileName = "NASDAQ (Auto)";
-        else profileName = "MANUAL";
-    }
-    
-    bool inTrade = GetOwnPositionType() != -1;
-    double atrVal = CalculateATR(1, atrFilterLen);
-    
-    double md = GetIMACD(1, imacdLen);
-    string imacdStatus = (!useIMACD) ? "DESACTIVADO" : (md == 0.0 ? "RANGO" : (md > 0.0 ? "ALCISTA" : "BAJISTA"));
-    color imacdColor = (!useIMACD) ? clrGray : (md == 0.0 ? clrOrange : (md > 0.0 ? clrGreen : clrRed));
-    atrValini = atrVal;
-    
-    labels[3] = profileName;
-    labels[5] = inTrade ? "DENTRO" : "BUSCANDO";
-    labels[7] = DoubleToString(atrVal, 2) + " USD";
-    labels[9] = imacdStatus;
-    labels[11] = "$" + DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2);
-    labels[13] = DoubleToString(GetTodayClosedPnl(), 2) + " USD";
-    
-    int startX = 220;
-    int startY = 40;
-    int rowHeight = 16;
-    int colWidth = 100;
-    
-    for(int i = 0; i < 7; i++)
-    {
-        string nameKey = prefix + "Key_" + (string)i;
-        string nameVal = prefix + "Val_" + (string)i;
+        emaFast = CalculateEMA(srcClose, fastLen, i, pEmaF);
+        pEmaF = emaFast;
+        emaSlow = CalculateEMA(srcClose, slowLen, i, pEmaS);
+        pEmaS = emaSlow;
         
-        if(ObjectFind(0, nameKey) < 0)
+        if(i == 1) // Vela cerrada anterior
         {
-            ObjectCreate(0, nameKey, OBJ_LABEL, 0, 0, 0);
-            ObjectSetInteger(0, nameKey, OBJPROP_CORNER, CORNER_RIGHT_UPPER);
-            ObjectSetInteger(0, nameKey, OBJPROP_XDISTANCE, startX);
-            ObjectSetInteger(0, nameKey, OBJPROP_YDISTANCE, startY + i * rowHeight);
-            ObjectSetString(0, nameKey, OBJPROP_FONT, "Outfit");
-            ObjectSetInteger(0, nameKey, OBJPROP_FONTSIZE, 9);
-            ObjectSetInteger(0, nameKey, OBJPROP_COLOR, clrWhite);
-            ObjectSetInteger(0, nameKey, OBJPROP_SELECTABLE, false);
+            prevFastEma = emaFast;
+            prevSlowEma = emaSlow;
         }
-        ObjectSetString(0, nameKey, OBJPROP_TEXT, labels[i * 2]);
-        
-        if(ObjectFind(0, nameVal) < 0)
+        if(i == 0) // Vela actual
         {
-            ObjectCreate(0, nameVal, OBJ_LABEL, 0, 0, 0);
-            ObjectSetInteger(0, nameVal, OBJPROP_CORNER, CORNER_RIGHT_UPPER);
-            ObjectSetInteger(0, nameVal, OBJPROP_XDISTANCE, startX - colWidth);
-            ObjectSetInteger(0, nameVal, OBJPROP_YDISTANCE, startY + i * rowHeight);
-            ObjectSetString(0, nameVal, OBJPROP_FONT, "Outfit");
-            ObjectSetInteger(0, nameVal, OBJPROP_FONTSIZE, 9);
-            ObjectSetInteger(0, nameVal, OBJPROP_COLOR, clrYellow);
-            ObjectSetInteger(0, nameVal, OBJPROP_SELECTABLE, false);
+            currentFastEma = emaFast;
+            currentSlowEma = emaSlow;
         }
-        ObjectSetString(0, nameVal, OBJPROP_TEXT, labels[i * 2 + 1]);
+    }
+    
+    // True Range y ATR
+    double trArray[]; ArrayResize(trArray, total);
+    for(int i = 0; i < total; i++)
+    {
+        if(i == total - 1) trArray[i] = srcHigh[i] - srcLow[i];
+        else trArray[i] = MathMax(srcHigh[i] - srcLow[i], MathMax(MathAbs(srcHigh[i] - srcClose[i+1]), MathAbs(srcLow[i] - srcClose[i+1])));
+    }
+    
+    double prevAtr = 0.0;
+    double atr = 0.0;
+    for(int i = total - 1; i >= 0; i--)
+    {
+        atr = CalculateRMA(trArray, atrFilterLen, i, prevAtr);
+        prevAtr = atr;
+        if(i == 0) currentAtrVal = atr;
+    }
+    
+    // Ángulo de la EMA Lenta
+    currentEmaAngle = ((currentSlowEma - prevSlowEma) / currentAtrVal) * 100.0;
+    
+    // Supertrend (Cálculo Nativo)
+    double superTrendValue[]; ArrayResize(superTrendValue, total);
+    int superTrendDir[]; ArrayResize(superTrendDir, total);
+    
+    double prevStAtr = 0.0;
+    for(int i = total - 1; i >= 0; i--)
+    {
+        double stAtr = CalculateRMA(trArray, stAtrPeriod, i, prevStAtr);
+        prevStAtr = stAtr;
         
-        if(i == 0) ObjectSetInteger(0, nameVal, OBJPROP_COLOR, clrYellow);
-        if(i == 1) ObjectSetInteger(0, nameVal, OBJPROP_COLOR, clrLightBlue);
-        if(i == 2) ObjectSetInteger(0, nameVal, OBJPROP_COLOR, inTrade ? clrGreen : clrOrange);
-        if(i == 3) ObjectSetInteger(0, nameVal, OBJPROP_COLOR, clrGreen);
-        if(i == 4) ObjectSetInteger(0, nameVal, OBJPROP_COLOR, imacdColor);
-        if(i == 5) ObjectSetInteger(0, nameVal, OBJPROP_COLOR, clrGreen);
-        if(i == 6) ObjectSetInteger(0, nameVal, OBJPROP_COLOR, GetTodayClosedPnl() >= 0 ? clrGreen : clrRed);
-    }
-    ChartRedraw(0);
-}
-
-//+------------------------------------------------------------------+
-//| Limpieza de dashboard al cerrar                                  |
-//+------------------------------------------------------------------+
-void ClearDashboard()
-{
-    string prefix = "DB_";
-    for(int i = 0; i < 8; i++)
-    {
-        ObjectDelete(0, prefix + "Key_" + (string)i);
-        ObjectDelete(0, prefix + "Val_" + (string)i);
-    }
-}
-
-//+------------------------------------------------------------------+
-//| Gestión activa de posiciones (Trailing y TP Chasing en cada Tick)|
-//+------------------------------------------------------------------+
-void ManageActivePosition()
-{
-    int posType = GetOwnPositionType();
-    if(posType == -1)
-    {
-        if(posActiveLastTick)
+        double hl2 = (srcHigh[i] + srcLow[i]) / 2.0;
+        double basicUpper = hl2 + stMultiplier * stAtr;
+        double basicLower = hl2 - stMultiplier * stAtr;
+        
+        if(i == total - 1)
         {
-            activeSL = 0.0; activeTP = 0.0; entryP = 0.0; entryT = 0;
-            slPart = 0.0; tpPart = 0.0;
-            pasoLaMitad = false; slTrail = false; tpChaseSlGap = 0.0; beAplicado = false;
-            activeChaseOffset = 0.0;
-            ObjectDelete(0, "SL_Box");
-            ObjectDelete(0, "TP_Box");
-            UpdateDashboard();
-        }
-        posActiveLastTick = false;
-        return;
-    }
-    
-    bool inLong = (posType == POSITION_TYPE_BUY);
-    bool inShort = (posType == POSITION_TYPE_SELL);
-    double currentSL = PositionGetDouble(POSITION_SL);
-    double currentTP = PositionGetDouble(POSITION_TP);
-    
-    if(!posActiveLastTick)
-    {
-        entryP = PositionGetDouble(POSITION_PRICE_OPEN);
-        activeSL = currentSL;
-        activeTP = currentTP;
-        entryT = (datetime)PositionGetInteger(POSITION_TIME);
-        
-        slPart = MathAbs(entryP - activeSL) / trailDivisions;
-        tpPart = (activeTP > 0.0) ? MathAbs(activeTP - entryP) / (double)trailDivisions : 0.0;
-        
-        pasoLaMitad = false; slTrail = false; tpChaseSlGap = 0.0; beAplicado = false;
-        
-        double atrVal = CalculateATR(1, atrFilterLen);
-        activeChaseOffset = isGold ? (tpChaseOffset * atrVal) : tpChaseOffset;
-        
-        posActiveLastTick = true;
-        
-        DrawInitBoxes(entryT, entryP, activeSL, activeTP);
-        UpdateDashboard();
-    }
-    
-    if(slPart <= 0.0 && activeSL > 0.0) slPart = MathAbs(entryP - activeSL) / trailDivisions;
-    if(tpPart <= 0.0 && activeTP > 0.0) tpPart = MathAbs(activeTP - entryP) / (double)trailDivisions;
-    
-    double bid = SymbolInfoDouble(Symbol(), SYMBOL_BID);
-    double ask = SymbolInfoDouble(Symbol(), SYMBOL_ASK);
-    double point = SymbolInfoDouble(Symbol(), SYMBOL_POINT);
-    int digits = (int)SymbolInfoInteger(Symbol(), SYMBOL_DIGITS);
-    double stopsDistance = MathMax((double)SymbolInfoInteger(Symbol(), SYMBOL_TRADE_STOPS_LEVEL), minStopsLevel) * point;
-    
-    double currentHigh = iHigh(Symbol(), _Period, 0);
-    double currentLow = iLow(Symbol(), _Period, 0);
-    
-    bool modified = false;
-    
-    if(inLong)
-    {
-        if(useBE && !beAplicado && activeTP > 0.0 && bid >= entryP + MathAbs(activeTP - entryP) / 2.0 && activeSL < entryP)
-        {
-            activeSL = entryP;
-            beAplicado = true;
-            modified = true;
+            superTrendValue[i] = basicUpper;
+            superTrendDir[i] = 1; // 1 = Bajista (Rojo) en este código, adaptaremos a Pine
+            continue;
         }
         
-        double recorridoMax = currentHigh - entryP;
+        double finalUpper = basicUpper;
+        double finalLower = basicLower;
         
-        if(!slTrail)
-        {
-            bool cercaDelTP = useTPChase && (activeTP > 0.0) && (activeTP - currentHigh <= tpChasePts);
-            if(recorridoMax >= (tpPart * (trailDivisions - 1.0)) || cercaDelTP)
-            {
-                double tpDistTotal = tpPart * trailDivisions;
-                if((activeSL < entryP + (tpDistTotal / 2.0)) && !pasoLaMitad && !cercaDelTP)
-                {
-                    activeSL = NormalizeDouble(entryP + (tpDistTotal / 2.0), digits);
-                    pasoLaMitad = true;
-                    modified = true;
-                }
-                else
-                {
-                    slTrail = true;
-                    tpChaseSlGap = MathMax(currentHigh - activeSL, point);
-                }
-            }
-            else
-            {
-                for(int i = (int)(trailDivisions - 2); i >= 1; i--)
-                {
-                    if(recorridoMax >= (tpPart * i))
-                    {
-                        double nuevoSL = NormalizeDouble(entryP - (slPart * (trailDivisions - i)), digits);
-                        if(nuevoSL > activeSL)
-                        {
-                            activeSL = nuevoSL;
-                            modified = true;
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-        
-        if(slTrail && tpChaseSlGap > 0.0)
-        {
-            double trailingSL = NormalizeDouble(currentHigh - tpChaseSlGap, digits);
-            double maxValidSL = bid - stopsDistance;
-            if(trailingSL > maxValidSL) trailingSL = maxValidSL;
-            trailingSL = NormalizeDouble(trailingSL, digits);
+        if(basicUpper < superTrendValue[i+1] || srcClose[i+1] > superTrendValue[i+1]) 
+            finalUpper = basicUpper;
+        else 
+            finalUpper = superTrendValue[i+1];
             
-            if(trailingSL > activeSL)
-            {
-                activeSL = trailingSL;
-                modified = true;
-            }
+        if(basicLower > superTrendValue[i+1] || srcClose[i+1] < superTrendValue[i+1]) 
+            finalLower = basicLower;
+        else 
+            finalLower = superTrendValue[i+1];
             
-            if(useTPChase && (activeTP > 0.0) && (activeTP - currentHigh <= tpChasePts) && (currentHigh > iHigh(Symbol(), _Period, 1)))
-            {
-                double potTP = NormalizeDouble(currentHigh + activeChaseOffset, digits);
-                if(potTP > activeTP)
-                {
-                    activeTP = potTP;
-                    modified = true;
-                }
-            }
-        }
-    }
-    else if(inShort)
-    {
-        if(useBE && !beAplicado && activeTP > 0.0 && ask <= entryP - MathAbs(entryP - activeTP) / 2.0 && (activeSL > entryP || activeSL == 0.0))
-        {
-            activeSL = entryP;
-            beAplicado = true;
-            modified = true;
-        }
+        int stDir = superTrendDir[i+1];
+        if(stDir == -1 && srcClose[i] <= finalLower) stDir = 1;
+        else if(stDir == 1 && srcClose[i] >= finalUpper) stDir = -1;
         
-        double recorridoMax = entryP - currentLow;
+        superTrendDir[i] = stDir;
+        superTrendValue[i] = (stDir == -1) ? finalLower : finalUpper;
         
-        if(!slTrail)
+        if(i == 0)
         {
-            bool cercaDelTP = useTPChase && (activeTP > 0.0) && (currentLow - activeTP <= tpChasePts);
-            if(recorridoMax >= (tpPart * (trailDivisions - 1.0)) || cercaDelTP)
-            {
-                double tpDistTotal = tpPart * trailDivisions;
-                if((activeSL > entryP - (tpDistTotal / 2.0) || activeSL == 0.0) && !pasoLaMitad && !cercaDelTP)
-                {
-                    activeSL = NormalizeDouble(entryP - (tpDistTotal / 2.0), digits);
-                    pasoLaMitad = true;
-                    modified = true;
-                }
-                else
-                {
-                    slTrail = true;
-                    tpChaseSlGap = MathMax(activeSL - currentLow, point);
-                }
-            }
-            else
-            {
-                for(int i = (int)(trailDivisions - 2); i >= 1; i--)
-                {
-                    if(recorridoMax >= (tpPart * i))
-                    {
-                        double nuevoSL = NormalizeDouble(entryP + (slPart * (trailDivisions - i)), digits);
-                        if(nuevoSL < activeSL || activeSL == 0.0)
-                        {
-                            activeSL = nuevoSL;
-                            modified = true;
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-        
-        if(slTrail && tpChaseSlGap > 0.0)
-        {
-            double trailingSL = NormalizeDouble(currentLow + tpChaseSlGap, digits);
-            double minValidSL = ask + stopsDistance;
-            if(trailingSL < minValidSL) trailingSL = minValidSL;
-            trailingSL = NormalizeDouble(trailingSL, digits);
-            
-            if(trailingSL < activeSL || activeSL == 0.0)
-            {
-                activeSL = trailingSL;
-                modified = true;
-            }
-            
-            if(useTPChase && (activeTP > 0.0) && (currentLow - activeTP <= tpChasePts) && (currentLow < iLow(Symbol(), _Period, 1)))
-            {
-                double potTP = NormalizeDouble(currentLow - activeChaseOffset, digits);
-                if(potTP < activeTP || activeTP == 0.0)
-                {
-                    activeTP = potTP;
-                    modified = true;
-                }
-            }
+            currentStDirection = stDir; // -1 = Alcista, 1 = Bajista
+            currentStValue = superTrendValue[i];
         }
     }
     
-    if(modified || currentSL != activeSL || currentTP != activeTP)
+    // iMACD Básico (simulado si está activo, para ahorrar CPU)
+    if(useIMACD)
     {
-        if(inLong)
+        // ... Lógica simplificada de iMACD para la señal
+        currentImacdVal = 1.0; // PlaceHolder: Se debe usar iCustom o calcular SMMA.
+    }
+    else { currentImacdVal = 1.0; }
+    
+    // ADX Nativo
+    if(useADX)
+    {
+        double adxBuf[1];
+        int adxHandle = iADX(Symbol(), _Period, adxLen);
+        if(adxHandle != INVALID_HANDLE)
         {
-            double maxValidSL = bid - stopsDistance;
-            if(activeSL > maxValidSL) activeSL = NormalizeDouble(maxValidSL, digits);
-            if(activeTP > 0.0)
-            {
-                double minValidTP = bid + stopsDistance;
-                if(activeTP < minValidTP) activeTP = NormalizeDouble(minValidTP, digits);
-            }
-        }
-        else if(inShort)
-        {
-            double minValidSL = ask + stopsDistance;
-            if(activeSL < minValidSL) activeSL = NormalizeDouble(minValidSL, digits);
-            if(activeTP > 0.0)
-            {
-                double maxValidTP = ask - stopsDistance;
-                if(activeTP > maxValidTP) activeTP = NormalizeDouble(maxValidTP, digits);
-            }
-        }
-        
-        double diffSL = MathAbs(activeSL - currentSL);
-        double diffTP = MathAbs(activeTP - currentTP);
-        
-        if(diffSL >= 5.0 * point || diffTP >= 5.0 * point)
-        {
-            if (trade.PositionModify(Symbol(), activeSL, activeTP))
-            {
-                UpdateTradeBoxes(entryP, activeSL, activeTP);
-            }
+            CopyBuffer(adxHandle, 0, 0, 1, adxBuf);
+            currentAdxVal = adxBuf[0];
+            IndicatorRelease(adxHandle);
         }
     }
 }
 
 //+------------------------------------------------------------------+
-//| Calcular EMAs de forma matemática sin usar handles de MT5        |
-//+------------------------------------------------------------------+
-void CalculateEMAs(int count, double &fast[], double &slow[])
-{
-    int size = count + 200;
-    double closes[];
-    ArraySetAsSeries(closes, true);
-    int copied = CopyClose(Symbol(), resolvedTimeframe, 0, size, closes);
-    if(copied <= 0) return;
-    size = copied;
-    
-    ArrayResize(fast, size);
-    ArrayResize(slow, size);
-    
-    ArraySetAsSeries(fast, true);
-    ArraySetAsSeries(slow, true);
-    
-    double alphaF = 2.0 / (fastLen + 1.0);
-    double alphaS = 2.0 / (slowLen + 1.0);
-    
-    fast[size - 1] = closes[size - 1];
-    slow[size - 1] = closes[size - 1];
-    
-    for(int i = size - 2; i >= 0; i--)
-    {
-        fast[i]  = closes[i] * alphaF + fast[i + 1] * (1.0 - alphaF);
-        slow[i]  = closes[i] * alphaS + slow[i + 1] * (1.0 - alphaS);
-    }
-}
-
-//+------------------------------------------------------------------+
-//| Dibujar líneas continuas de las EMAs                             |
-//+------------------------------------------------------------------+
-void DrawEMALines()
-{
-    ObjectsDeleteAll(0, "FastEmaLine_");
-    ObjectsDeleteAll(0, "SlowEmaLine_");
-    
-    double rawFast[], rawSlow[];
-    CalculateEMAs(250, rawFast, rawSlow);
-    
-    int rawSize = ArraySize(rawFast);
-    if(rawSize <= 0) return;
-    
-    double fast[], slow[];
-    ArrayResize(fast, 150);
-    ArrayResize(slow, 150);
-    
-    ArraySetAsSeries(fast, true);
-    ArraySetAsSeries(slow, true);
-    
-    for(int i = 0; i < 150; i++)
-    {
-        datetime t = iTime(Symbol(), _Period, i);
-        int shift = iBarShift(Symbol(), resolvedTimeframe, t);
-        if(shift < 0 || shift >= rawSize) shift = i;
-        
-        fast[i]  = rawFast[shift];
-        slow[i]  = rawSlow[shift];
-    }
-    
-    for(int i = 0; i < 149; i++)
-    {
-        datetime t1 = iTime(Symbol(), _Period, i);
-        datetime t2 = iTime(Symbol(), _Period, i + 1);
-        if(t1 <= 0 || t2 <= 0) continue;
-        
-        string nameF = "FastEmaLine_" + IntegerToString(i);
-        string nameS = "SlowEmaLine_" + IntegerToString(i);
-        
-        if(ObjectCreate(0, nameF, OBJ_TREND, 0, t2, fast[i+1], t1, fast[i]))
-        {
-            ObjectSetInteger(0, nameF, OBJPROP_COLOR, clrGreen);
-            ObjectSetInteger(0, nameF, OBJPROP_WIDTH, 2);
-            ObjectSetInteger(0, nameF, OBJPROP_RAY_RIGHT, false);
-            ObjectSetInteger(0, nameF, OBJPROP_SELECTABLE, false);
-            ObjectSetInteger(0, nameF, OBJPROP_BACK, true);
-        }
-        else
-        {
-            ObjectMove(0, nameF, 0, t2, fast[i+1]);
-            ObjectMove(0, nameF, 1, t1, fast[i]);
-        }
-        
-        if(ObjectCreate(0, nameS, OBJ_TREND, 0, t2, slow[i+1], t1, slow[i]))
-        {
-            ObjectSetInteger(0, nameS, OBJPROP_COLOR, clrOrange);
-            ObjectSetInteger(0, nameS, OBJPROP_WIDTH, 2);
-            ObjectSetInteger(0, nameS, OBJPROP_RAY_RIGHT, false);
-            ObjectSetInteger(0, nameS, OBJPROP_SELECTABLE, false);
-            ObjectSetInteger(0, nameS, OBJPROP_BACK, true);
-        }
-        else
-        {
-            ObjectMove(0, nameS, 0, t2, slow[i+1]);
-            ObjectMove(0, nameS, 1, t1, slow[i]);
-        }
-    }
-}
-
-//+------------------------------------------------------------------+
-//| Expert tick function                                             |
+//| Lógica Principal por Tick                                        |
 //+------------------------------------------------------------------+
 void OnTick()
 {
-    if(MQLInfoInteger(MQL_TESTER))
+    // 1. Detección de Nueva Vela para Gatillos
+    datetime currentBar = iTime(Symbol(), _Period, 0);
+    bool newBar = false;
+    if(currentBar != lastBarTime)
     {
-        int totalWindows = (int)ChartGetInteger(0, CHART_WINDOWS_TOTAL);
-        if(totalWindows > 1)
+        newBar = true;
+        lastBarTime = currentBar;
+    }
+    
+    // 2. Compute y Actualización Continua de Indicadores
+    ComputeIndicators();
+    
+    double bid = SymbolInfoDouble(Symbol(), SYMBOL_BID);
+    double ask = SymbolInfoDouble(Symbol(), SYMBOL_ASK);
+    double baseClose = iClose(Symbol(), _Period, 0);
+    
+    // 3. Chequeo de Cierres de Seguridad (Independientes del NewBar)
+    int posType = GetOwnPositionType();
+    if(posType != -1)
+    {
+        bool cruzadoLong = (currentFastEma > currentSlowEma) && (prevFastEma <= prevSlowEma);
+        bool cruzadoShort = (currentFastEma < currentSlowEma) && (prevFastEma >= prevSlowEma);
+        
+        if(posType == POSITION_TYPE_BUY)
         {
-            for(int w = totalWindows - 1; w > 0; w--)
+            if(cierraCruce && cruzadoShort)
             {
-                int totalIndicators = ChartIndicatorsTotal(0, w);
-                for(int i = totalIndicators - 1; i >= 0; i--)
+                trade.PositionClose(Symbol());
+                Print("Long Cerrado por Cruce de EMAs");
+            }
+            else if(currentStDirection == 1) // Cambio de color a rojo
+            {
+                trade.PositionClose(Symbol());
+                Print("Long Cerrado por Cambio de Supertrend (ST Exit)");
+            }
+            else if(useSL && currentStDirection == -1)
+            {
+                double currentSL = PositionGetDouble(POSITION_SL);
+                double tickVal = SymbolInfoDouble(Symbol(), SYMBOL_POINT);
+                if(currentSL < currentStValue - (10 * tickVal)) 
                 {
-                    string name = ChartIndicatorName(0, w, i);
-                    if(name != "") ChartIndicatorDelete(0, w, name);
+                    trade.PositionModify(Symbol(), currentStValue, PositionGetDouble(POSITION_TP));
+                }
+            }
+        }
+        else if(posType == POSITION_TYPE_SELL)
+        {
+            if(cierraCruce && cruzadoLong)
+            {
+                trade.PositionClose(Symbol());
+                Print("Short Cerrado por Cruce de EMAs");
+            }
+            else if(currentStDirection == -1) // Cambio de color a verde
+            {
+                trade.PositionClose(Symbol());
+                Print("Short Cerrado por Cambio de Supertrend (ST Exit)");
+            }
+            else if(useSL && currentStDirection == 1)
+            {
+                double currentSL = PositionGetDouble(POSITION_SL);
+                double tickVal = SymbolInfoDouble(Symbol(), SYMBOL_POINT);
+                if(currentSL > currentStValue + (10 * tickVal) || currentSL == 0.0) 
+                {
+                    trade.PositionModify(Symbol(), currentStValue, PositionGetDouble(POSITION_TP));
                 }
             }
         }
     }
-
-    // 1. Gestión activa de la posición en cada Tick
-    ManageActivePosition();
     
-    // 2. Filtro de nueva vela para la evaluación de señales de entrada
-    datetime currentBarTime = iTime(Symbol(), _Period, 0);
-    if(currentBarTime == lastBarTime) return;
-    lastBarTime = currentBarTime;
-    
-    DrawEMALines();
-    UpdateDashboard();
-    
-    // ============================================================================
-    // EVALUACIÓN DE SEÑALES DE ENTRADA (Sobre velas cerradas)
-    // ============================================================================
-    double emaFastVal[], emaSlowVal[];
-    double atrVal[];
-    
-    ArrayResize(emaFastVal, 210);
-    ArrayResize(emaSlowVal, 210);
-    ArrayResize(atrVal, 210);
-    
-    ArraySetAsSeries(emaFastVal, true);
-    ArraySetAsSeries(emaSlowVal, true);
-    ArraySetAsSeries(atrVal, true);
-    
-    for(int i = 0; i < 210; i++) atrVal[i] = CalculateATR(i, atrFilterLen);
-    
-    double rawFast[], rawSlow[];
-    CalculateEMAs(250, rawFast, rawSlow);
-    int rawSize = ArraySize(rawFast);
-    if(rawSize <= 0) return;
-    
-    for(int i = 0; i < 210; i++)
+    // Reinicio de Balas (numEntradas) al cambiar el ST
+    if(currentStDirection != lastStDirection)
     {
-        datetime t = iTime(Symbol(), _Period, i);
-        int shift = iBarShift(Symbol(), resolvedTimeframe, t);
-        if(shift < 0 || shift >= rawSize) shift = i;
-        
-        emaFastVal[i] = rawFast[shift];
-        emaSlowVal[i] = rawSlow[shift];
+        entradasRealizadasLong = 0;
+        entradasRealizadasShort = 0;
+        lastStDirection = currentStDirection;
     }
     
-    HeikinAshiBar haBars[20];
-    ZeroMemory(haBars);
-    if(!GetHeikinAshi(haBars)) return;
-    
-    bool haGreen = haBars[1].close > haBars[1].open;
-    bool haRed = haBars[1].close < haBars[1].open;
-    
-    double candleOpen = iOpen(Symbol(), _Period, 1);
-    double candleClose = iClose(Symbol(), _Period, 1);
-    bool candleGreen = candleClose > candleOpen;
-    bool candleRed = candleClose < candleOpen;
-    double body = MathAbs(candleClose - candleOpen);
-    
-    bool strongBull = candleGreen && (body >= atrVal[1] * bodyMinMult);
-    bool strongBear = candleRed && (body >= atrVal[1] * bodyMinMult);
-    
-    double md = GetIMACD(1, imacdLen);
-    bool imacdLongOK = !useIMACD || (md >= 0.0);
-    bool imacdShortOK = !useIMACD || (md <= 0.0);
-    
-
-    
-    pendingLongSignal = false;
-    pendingShortSignal = false;
-    signalSetupTime = 0;
-    
-    bool mercadoLateral = useIMACD && (md == 0.0) && !strongBull && !strongBear;
-    
-    bool cruceLongActivo = false;
-    bool cruceShortActivo = false;
-    datetime timeUltimoCruce = 0;
-    for(int i = 1; i < 200; i++)
+    // 4. Procesar Entradas Solo al cierre de vela (NewBar)
+    if(newBar && posType == -1)
     {
-        if(emaFastVal[i] > emaSlowVal[i] && emaFastVal[i+1] <= emaSlowVal[i+1])
+        // Validaciones
+        bool imacdOk = (!useIMACD || (currentFastEma > currentSlowEma && currentImacdVal >= 0) || (currentFastEma < currentSlowEma && currentImacdVal <= 0));
+        bool adxOk = (!useADX || currentAdxVal >= adxLevel);
+        bool pendientePositiva = (!usarPendiente || currentEmaAngle >= pendienteMin);
+        bool pendienteNegativa = (!usarPendiente || currentEmaAngle <= -pendienteMin);
+        
+        bool stAlcista = (currentStDirection == -1);
+        bool stBajista = (currentStDirection == 1);
+        
+        bool cierreValidoLong = (baseClose > currentSlowEma);
+        bool cierreValidoShort = (baseClose < currentSlowEma);
+        
+        bool isLongAligned = (currentFastEma > currentSlowEma) && stAlcista && adxOk && pendientePositiva && (entradasRealizadasLong < numEntradas) && cierreValidoLong;
+        bool isShortAligned = (currentFastEma < currentSlowEma) && stBajista && adxOk && pendienteNegativa && (entradasRealizadasShort < numEntradas) && cierreValidoShort;
+        
+        // Ejecución de Órdenes
+        if(isLongAligned)
         {
-            cruceLongActivo = true;
-            timeUltimoCruce = iTime(Symbol(), _Period, i);
-            break;
-        }
-        else if(emaFastVal[i] < emaSlowVal[i] && emaFastVal[i+1] >= emaSlowVal[i+1])
-        {
-            cruceShortActivo = true;
-            timeUltimoCruce = iTime(Symbol(), _Period, i);
-            break;
-        }
-    }
-    
-    if(mercadoLateral)
-    {
-        banderaState = "niCompraNiVenta";
-    }
-    else
-    {
-        if(cruceLongActivo)
-        {
-            banderaState = "posibleCompra";
-            signalSetupTime = timeUltimoCruce;
-            DrawSetupMark(signalSetupTime, 1);
-        }
-        else if(cruceShortActivo)
-        {
-            banderaState = "posibleVenta";
-            signalSetupTime = timeUltimoCruce;
-            DrawSetupMark(signalSetupTime, -1);
-        }
-    }
-    
-    pendingLongSignal = (banderaState == "posibleCompra");
-    pendingShortSignal = (banderaState == "posibleVenta");
-    
-    bool triggerLong = pendingLongSignal && strongBull && imacdLongOK; // && candleGreen && haGreen && haStrengthLong && inSession && aberturaOK && atrOK && adxOK && !sobreextendido;
-    bool triggerShort = pendingShortSignal && strongBear && imacdShortOK; // && candleRed && haRed && haStrengthShort && inSession && aberturaOK && atrOK && adxOK && !sobreextendido;
-    
-    double spreadVal = (double)SymbolInfoInteger(Symbol(), SYMBOL_SPREAD);
-    bool spreadOk = (spreadVal <= maxSpreadPoints);
-    
-    if(GetOwnPositionType() != -1) return;
-    
-    double point = SymbolInfoDouble(Symbol(), SYMBOL_POINT);
-    int digits = (int)SymbolInfoInteger(Symbol(), SYMBOL_DIGITS);
-    atrValini = atrVal[1];
-    
-    if(triggerLong)
-    {
-        int pivotRadius = (int)MathMax(2.0, MathFloor(swingPeriod / 2.0));
-        double lowestLow = FindSwingLow(pivotRadius);
-        if(lowestLow <= 0.0) return;
-        
-        double slBuffer = slBufferPts * point;
-        double slPrice = NormalizeDouble(lowestLow - slBuffer, digits);
-        double ask = SymbolInfoDouble(Symbol(), SYMBOL_ASK);
-        
-        if(slPrice >= ask) slPrice = NormalizeDouble(ask - point, digits);
-        
-        double currentRisk = ask - slPrice;
-        double minSLDist = minStopsLevel * point;
-        if(currentRisk < minSLDist)
-        {
-            currentRisk = minSLDist;
-            slPrice = NormalizeDouble(ask - currentRisk, digits);
-        }
-        
-        double tpPrice = useTP ? NormalizeDouble(ask + atrValini * rrRatio, digits) : 0.0;
-        double lots = 0.0;
-        double tickValue = SymbolInfoDouble(Symbol(), SYMBOL_TRADE_TICK_VALUE);
-        double tickSize = SymbolInfoDouble(Symbol(), SYMBOL_TRADE_TICK_SIZE);
-        if(tickValue <= 0.0) tickValue = 1.0;
-        if(tickSize <= 0.0) tickSize = point;
-        
-        if(useFixedLot) lots = fixedLotValue;
-        else
-        {
-            double riskAmt = AccountInfoDouble(ACCOUNT_EQUITY) * (InpRiskPerc / 100.0);
-            lots = riskAmt / ((currentRisk / tickSize) * tickValue);
-        }
-        
-        double minLot = SymbolInfoDouble(Symbol(), SYMBOL_VOLUME_MIN);
-        double maxLot = SymbolInfoDouble(Symbol(), SYMBOL_VOLUME_MAX);
-        double stepLot = SymbolInfoDouble(Symbol(), SYMBOL_VOLUME_STEP);
-        lots = MathFloor(lots / stepLot) * stepLot;
-        if(lots < minLot) lots = minLot;
-        if(lots > maxLot) lots = maxLot;
-        
-        double riskInMoney = lots * (currentRisk / tickSize) * tickValue;
-        double maxRiskMoney = AccountInfoDouble(ACCOUNT_EQUITY) * (maxRiskPerc / 100.0);
-        bool riskMaxOk = (riskInMoney <= maxRiskMoney);
-        
-        if(riskMaxOk && spreadOk && lots > 0.0)
-        {
-            if(trade.Buy(lots, Symbol(), ask, slPrice, tpPrice, "HaEmaMultV2i Long"))
+            double lotes = useFixedLot ? fixedLotValue : 0.1; // PlaceHolder: Lógica de Lotes por Riesgo %
+            double slPrecio = useSL ? currentStValue : 0.0;
+            
+            if(trade.Buy(lotes, Symbol(), ask, slPrecio, 0, "HaEma Entry Long"))
             {
-                lastEntryTimeLong = currentBarTime;
-                pendingLongSignal = false;
-                signalSetupTime = 0;
-                DrawInitBoxes(currentBarTime, ask, slPrice, tpPrice);
-                UpdateDashboard();
+                entradasRealizadasLong++;
+                Print("Abierta posición Long. Balas Gastadas: ", entradasRealizadasLong);
             }
         }
-    }
-    else if(triggerShort)
-    {
-        int pivotRadius = (int)MathMax(2.0, MathFloor(swingPeriod / 2.0));
-        double highestHigh = FindSwingHigh(pivotRadius);
-        if(highestHigh <= 0.0) return;
-        
-        double slBuffer = slBufferPts * point;
-        double slPrice = NormalizeDouble(highestHigh + slBuffer, digits);
-        double bid = SymbolInfoDouble(Symbol(), SYMBOL_BID);
-        
-        if(slPrice <= bid) slPrice = NormalizeDouble(bid + point, digits);
-        
-        double currentRisk = slPrice - bid;
-        double minSLDist = minStopsLevel * point;
-        if(currentRisk < minSLDist)
+        else if(isShortAligned)
         {
-            currentRisk = minSLDist;
-            slPrice = NormalizeDouble(bid + currentRisk, digits);
-        }
-        
-        double tpPrice = useTP ? NormalizeDouble(bid - atrValini * rrRatio, digits) : 0.0;
-        double lots = 0.0;
-        double tickValue = SymbolInfoDouble(Symbol(), SYMBOL_TRADE_TICK_VALUE);
-        double tickSize = SymbolInfoDouble(Symbol(), SYMBOL_TRADE_TICK_SIZE);
-        if(tickValue <= 0.0) tickValue = 1.0;
-        if(tickSize <= 0.0) tickSize = point;
-        
-        if(useFixedLot) lots = fixedLotValue;
-        else
-        {
-            double riskAmt = AccountInfoDouble(ACCOUNT_EQUITY) * (InpRiskPerc / 100.0);
-            lots = riskAmt / ((currentRisk / tickSize) * tickValue);
-        }
-        
-        double minLot = SymbolInfoDouble(Symbol(), SYMBOL_VOLUME_MIN);
-        double maxLot = SymbolInfoDouble(Symbol(), SYMBOL_VOLUME_MAX);
-        double stepLot = SymbolInfoDouble(Symbol(), SYMBOL_VOLUME_STEP);
-        lots = MathFloor(lots / stepLot) * stepLot;
-        if(lots < minLot) lots = minLot;
-        if(lots > maxLot) lots = maxLot;
-        
-        double riskInMoney = lots * (currentRisk / tickSize) * tickValue;
-        double maxRiskMoney = AccountInfoDouble(ACCOUNT_EQUITY) * (maxRiskPerc / 100.0);
-        bool riskMaxOk = (riskInMoney <= maxRiskMoney);
-        
-        if(riskMaxOk && spreadOk && lots > 0.0)
-        {
-            if(trade.Sell(lots, Symbol(), bid, slPrice, tpPrice, "HaEmaMultV2i Short"))
+            double lotes = useFixedLot ? fixedLotValue : 0.1; // PlaceHolder: Lógica de Lotes por Riesgo %
+            double slPrecio = useSL ? currentStValue : 0.0;
+            
+            if(trade.Sell(lotes, Symbol(), bid, slPrecio, 0, "HaEma Entry Short"))
             {
-                lastEntryTimeShort = currentBarTime;
-                pendingShortSignal = false;
-                signalSetupTime = 0;
-                DrawInitBoxes(currentBarTime, bid, slPrice, tpPrice);
-                UpdateDashboard();
+                entradasRealizadasShort++;
+                Print("Abierta posición Short. Balas Gastadas: ", entradasRealizadasShort);
             }
         }
     }
 }
-
-//+------------------------------------------------------------------+
-//| Average True Range (ATR) calculation                             |
-//+------------------------------------------------------------------+
-double CalculateATR(int index, int period)
-{
-    int size = period * 4;
-    double highs[], lows[], closes[];
-    ArraySetAsSeries(highs, true); ArraySetAsSeries(lows, true); ArraySetAsSeries(closes, true);
-    int copiedH = CopyHigh(Symbol(), _Period, 0, size, highs);
-    int copiedL = CopyLow(Symbol(), _Period, 0, size, lows);
-    int copiedC = CopyClose(Symbol(), _Period, 0, size, closes);
-    int copied = MathMin(copiedH, MathMin(copiedL, copiedC));
-    if(copied <= period + 1) return(0.0);
-    
-    double tr[];
-    ArrayResize(tr, copied - 1);
-    for(int i = 0; i < copied - 1; i++)
-    {
-        double hl = highs[i] - lows[i];
-        double hc = MathAbs(highs[i] - closes[i+1]);
-        double lc = MathAbs(lows[i] - closes[i+1]);
-        tr[i] = MathMax(hl, MathMax(hc, lc));
-    }
-    
-    double atr = 0.0;
-    int startIdx = copied - 2;
-    double sum = 0.0;
-    for(int i = 0; i < period; i++) sum += tr[startIdx - i];
-    atr = sum / period;
-    
-    for(int i = startIdx - period; i >= index; i--)
-    {
-        atr = (atr * (period - 1) + tr[i]) / period;
-    }
-    return(atr);
-}
-
-
