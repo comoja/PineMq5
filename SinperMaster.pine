@@ -98,8 +98,8 @@ if strategy.position_size == 0
 // --- DIBUJO DE ETIQUETAS AL CAMBIAR POSICIÓN ---
 if ta.change(strategy.position_size) != 0 and strategy.position_size != 0
     esLong = strategy.position_size > 0
-    label.new(bar_index, tp_fijo, (esLong ? "COMPRA" : "VENTA") +" TP " + str.tostring(tp_fijo, format.mintick), color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)
-    label.new(bar_index, sl_ini, (esLong ? "COMPRA" : "VENTA") +" SL " + str.tostring(sl_ini, format.mintick), color=color.red, textcolor=color.white, style=label.style_label_left, size=size.small)
+    label.new(bar_index, tp_fijo, (esLong ? "COMPRA" : "VENTA") +" TP " + str.tostring(tp_fijo, format.mintick), color=color.green, textcolor=color.white, style=esLong?label.style_label_down:label.style_label_up, size=size.small)
+    label.new(bar_index, sl_ini, (esLong ? "COMPRA" : "VENTA") +" SL " + str.tostring(sl_ini, format.mintick), color=color.red, textcolor=color.white, style=esLong?label.style_label_up:label.style_label_down, size=size.small)
    // label.new(bar_index, esLong ? low : high, (esLong ? "COMPRA" : "VENTA") + "\n" + str.tostring(math.abs(strategy.position_size), "#.###"), color=esLong?color.green:color.red, textcolor=color.white, style=esLong?label.style_label_up:label.style_label_down, yloc=esLong?yloc.belowbar:yloc.abovebar, size=size.small)
     line.new(bar_index, close, bar_index, tp_fijo, color=color.new(color.green, 50), style=line.style_dashed)
     line.new(bar_index, close, bar_index, sl_ini, color=color.new(color.red, 50), style=line.style_dashed)
@@ -127,7 +127,7 @@ if strategy.closedtrades > last_id
 // --- DIBUJADO DINÁMICO ---
 inTrade = strategy.position_size != 0
 plot(emaVal, "EMA", color=color.blue, linewidth=1, style=plot.style_linebr)
-plot(inTrade and show_sar ? slDinamico : na, "SL SAR", color=color.red, linewidth=3, style=plot.style_linebr)
+plot(inTrade  ? slDinamico : na, "SL Dinamico", color=color.red, linewidth=2, style=plot.style_linebr)
 
 plot(inTrade ? tp_fijo : na, "TP", color=color.green, linewidth=1, style=plot.style_circles)
 
