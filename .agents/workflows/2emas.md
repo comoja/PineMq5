@@ -3,11 +3,11 @@ description: Estrategia basada cruce de emaRapida y emaLenta
 ---
 
 ### Calculos iniciales
-- Calcular emaRapida = 20
-- Calcular emaLenta  = 50
+- Calcular emaRapida (se va a ajustar dependiendo del instrumento)
+- Calcular emaLenta  (se va a ajustar dependiendo del instrumento)
 - Calcular pendienteEmaRapida en grados
 - Calcular pendienteEmaLenta en grados
-- definir pendienteMinima = 12 (para compras es + y para ventas es -)
+- definir pendienteMinima = (se va a ajustar dependiendo del instrumento, para compras es + y para ventas es -)
 
 ## Ciclo principal en cada tick
 - **Detección del Cruce:** El cruce de EMAs se detecta exclusivamente con **velas cerradas** (velas 1 y 2) para evitar señales falsas intra-vela (repintado).
@@ -22,7 +22,7 @@ description: Estrategia basada cruce de emaRapida y emaLenta
 - **Salida:** Cuando el precio cierre por debajo (compras) o por encima (ventas) de la emaLenta (50), O cuando haya un cruce de EMAs en sentido contrario.
 
 ## Notas sobre la implementación técnica:
-1. **Detección de Posición e Interferencias:** Se usa `getOwnPositionType()` respetando estrictamente el `magicNumber` y el `_Symbol` [MQ5-CRITICAL #1, #2 y #4].
+1. **Detección de Posición e Interferencias:** no entra si ya hay una posicion abierta
 2. **Dibujado de Cruces:** Se llama a `drawArrow()` cuando se detecta el cruce en velas cerradas. Se usa una memoria `static datetime` para no redibujar o sobreescribir la flecha.
 3. **CamelCase:** Las funciones internas respetan el formato `camelCase` por regla del sistema.
 4. **Validación Extra del Precio:** Para las salidas, se implementó el OR `(closeActual < emaLentaActual)` protegiendo de retiros de beneficios profundos.
