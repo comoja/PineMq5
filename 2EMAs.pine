@@ -4,40 +4,132 @@ strategy("2EMAs", overlay=true, initial_capital=1000, margin_long=1, margin_shor
 //====================================================================
 // PARÁMETROS DE PINECONNECTOR
 //====================================================================
-use_pc         = input.bool(true, "Enviar alertas a PineConnector", group="PineConnector")
-pc_license_id  = input.string("9093998805205", "PineConnector License ID", group="PineConnector")
-pc_symbol      = input.string("", "Símbolo en MT5 (Vacío = Default)", group="PineConnector")
+var bool usePc         = true
+var string pcLicenseId  = "9093998805205"
+var string pcSymbol      = ""
+marketIdInput = input.string("", "Market ID Opcional (Para FOREX.com)", group="PineConnector")
+var float spreadTicks   = 0.0
 
 //====================================================================
-// VARIABLES GLOBALES (Parámetros Fijos - Sin Inputs)
+// VARIABLES GLOBALES (Configuración Base por Defecto)
 //====================================================================
-float riskPercent = 0.5 // Reducido para bajar el Drawdown a niveles institucionales (<15%)
-float atrMult = 0.5
-float rrMult = 3.1
-float intraRR = 1.5
-float proporcionRRcontraria = 0.5
-float atrDynamicTP = 0.5
+var float riskPercent = 0.5
+var float maxDailyLossPercent = 2.0
+var int velasDescanso = 1
 
-int emaRapidaPeriod = 11
-int emaLentaPeriod = 60
-float pendienteMin = 34.0
-int atrPeriod = 14
+var float slAtrMult = 0.5
+var float tpRRMult = 2.8
+var float intraRR = 1.4
+var float proporcionRRcontraria = 0.5
+var float atrDynamicTP = 0.5
 
-int diasTendencia = 3
-bool bloqueoXtendencia = false
+simple string sym_t = syminfo.ticker
 
-bool useADXFilter = true
-int adxPeriod = 14
-int adxMin = 20 // Regresa a 20 para filtrar mejor la basura lateral
+simple int emaRapidaPeriod = switch
+    str.contains(sym_t, "XAU") or str.contains(sym_t, "GOLD") => 9
+    str.contains(sym_t, "XAG") or str.contains(sym_t, "SILVER") => 9
+    str.contains(sym_t, "NAS") or str.contains(sym_t, "US100") or str.contains(sym_t, "NQ") => 9
+    str.contains(sym_t, "BTC") => 9
+    => 9
 
-bool useChopFilter = true
-int maxCruces = 2
+simple int emaLentaPeriod = switch
+    str.contains(sym_t, "XAU") or str.contains(sym_t, "GOLD") => 140
+    str.contains(sym_t, "XAG") or str.contains(sym_t, "SILVER") => 78
+    str.contains(sym_t, "NAS") or str.contains(sym_t, "US100") or str.contains(sym_t, "NQ") => 140
+    str.contains(sym_t, "BTC") => 100
+    => 140
+var float pendienteMin = 34.0
+var int atrPeriod = 14
 
-bool useSessionFilter = false
-string sessionTime = "0930-1600"
+var bool bloqueoXtendencia = false
+var int diasTendencia = 2
 
-bool useVolumeFilter = false
-int volPeriod = 20
+var bool useADXFilter = true
+var bool velaPrevia = true
+var int adxPeriod = 14
+var int adxMin = 20
+
+var bool useChopFilter = true
+var int maxCruces = 2
+
+var bool useSessionFilter = false
+var string sessionTime = "0930-1600"
+
+var bool useVolumeFilter = false
+var int volPeriod = 20
+float slDistancia = 0
+float metaBe  = 0.0
+
+// Variables para caché de mensajes JSON
+var string cached_alert_msg_close_buy = ""
+var string cached_alert_msg_close_sell = ""
+
+//====================================================================
+// CONFIGURACIÓN ADAPTATIVA POR ACTIVO (Ecosistemas)
+//====================================================================
+if barstate.isfirst
+    string t = syminfo.ticker
+    
+    // 1. ORO (Ecosistema Institucional)
+    if str.contains(t, "XAU") or str.contains(t, "GOLD")
+        riskPercent := 0.5
+        slAtrMult := 1.8
+        tpRRMult := 1.50
+        atrDynamicTP := 0.5
+        pendienteMin := 27.0
+        useSessionFilter := true
+        sessionTime := "0800-1600"
+        useVolumeFilter := true
+        bloqueoXtendencia := true
+        adxMin := 22
+        maxCruces := 1
+        
+        
+    // 2. PLATA (Ecosistema Especulativo)
+    else if str.contains(t, "XAG") or str.contains(t, "SILVER")
+        riskPercent := 0.50
+        slAtrMult := 2.3
+        tpRRMult := 4.0
+        atrDynamicTP := 0.88
+        pendienteMin := 27.0
+        useSessionFilter := true
+        sessionTime := "0400-1600"
+        useVolumeFilter := false
+        bloqueoXtendencia := false
+        adxMin := 22
+        maxCruces := 2
+        
+    // 3. NASDAQ (Ecosistema Institucional)
+    else if str.contains(t, "NAS") or str.contains(t, "US100") or str.contains(t, "NQ")
+        riskPercent := 0.5
+        slAtrMult := 1.5
+        tpRRMult := 2.5
+        pendienteMin := 15.0
+        useSessionFilter := true
+        sessionTime := "0930-1600"
+        useVolumeFilter := true
+        bloqueoXtendencia := false
+        adxMin := 22
+        maxCruces := 2
+        
+    // 4. BITCOIN (Ecosistema Especulativo)
+    else if str.contains(t, "BTC")
+        riskPercent := 0.50
+        slAtrMult := 1.0
+        tpRRMult := 2.0
+        atrDynamicTP := 0.5
+        pendienteMin := 27.0
+        useSessionFilter := false
+        sessionTime := "0400-1600"
+        useVolumeFilter := false
+        bloqueoXtendencia := false
+        adxMin := 20
+        maxCruces := 2
+       
+
+
+
+
 
 //====================================================================
 // INDICADORES
@@ -46,25 +138,25 @@ emaR = ta.ema(close, emaRapidaPeriod)
 emaL = ta.ema(close, emaLentaPeriod)
 atrVal = ta.atr(atrPeriod)
 
-// Pendiente de la EMA rápida en ticks (puntos) de la vela anterior
-// Se usa [1] y [2] porque en MQL5 el cálculo usaba buffer[1] y buffer[2]
-pendiente_rapida = (emaR[1] - emaR[2]) / syminfo.mintick
+// Pendiente de la EMA rápida en ticks (puntos) de la vela actual
+pendienteRapida = (emaR - emaR[1]) / syminfo.mintick
 
 // Filtros Anti-Rango (ADX y Chop)
 [_, _, adxVal] = ta.dmi(adxPeriod, adxPeriod)
-bool bypass_adx = math.abs(pendiente_rapida) > (pendienteMin * 1.5) // Si la caída es hiper-violenta, ignoramos que el ADX sea lento
-filtro_adx = useADXFilter ? (adxVal > adxMin or bypass_adx) : true
+bool bypassAdx = math.abs(pendienteRapida) > (pendienteMin * 1.5) // Si la caída es hiper-violenta, ignoramos que el ADX sea lento
+filtroAdx = useADXFilter ? (adxVal > adxMin or bypassAdx) : true
 
-cruces_ema = math.sum(ta.cross(close, emaL) ? 1 : 0, 15)
-filtro_chop = useChopFilter ? cruces_ema <= maxCruces : true
+crucesEma = math.sum(ta.cross(close, emaL) ? 1 : 0, 15)
+filtroChop = useChopFilter ? crucesEma <= maxCruces : true
 
 // Filtro de Sesión (Hora NY)
-in_session = not na(time(timeframe.period, sessionTime, "America/New_York"))
-filtro_sesion = useSessionFilter ? in_session : true
+inSession = not na(time(timeframe.period, sessionTime, "America/New_York"))
+filtroSesion = useSessionFilter ? inSession : true
 
-// Filtro de Volumen
-vol_ma = ta.sma(volume, volPeriod)
-filtro_volumen = useVolumeFilter ? (volume > vol_ma) : true
+// Filtro de Volumen Inteligente (Bypass si el broker no tiene volumen)
+tieneVol = not na(volume) and volume > 0
+volMa = ta.sma(volume, volPeriod)
+filtroVolumen = useVolumeFilter ? (tieneVol ? (volume > volMa) : true) : true
 
 // Dibujo de Indicadores
 plot(emaR, "EMA Rápida", color=color.yellow)
@@ -91,46 +183,49 @@ if closeYesterday > 0 and openPast > 0
 cruceAlcistaEmas = emaR[1] > emaL[1] and emaR[2] <= emaL[2]
 cruceBajistaEmas = emaR[1] < emaL[1] and emaR[2] >= emaL[2]
 
-var int currentTrend = 0
-var float lastPositionExitPrice = 0.0
+varip int currentTrend = 0
+varip float lastPositionExitPrice = 0.0
 
-var float slPrice = na
-var float tpPrice = na
-var float entry_price = na
-var float entry_atr = na
+varip float slPrice = na
+varip float tpPrice = na
+varip float entryPrice = na
+varip float entryAtr = na
 
-var bool be_activated = false
-var float be_trail_dist = 0.0
+varip bool beActivated = false
+varip float beTrailDist = 0.0
 
-var bool dynamic_tp_activated = false
-var float original_tp = na
-var float current_rr_mult = na
+varip bool dynamicTpActivated = false
+varip float originalTp = na
+varip float currentRrMult = na
 
-bool is_lateral = not (filtro_adx and filtro_chop)
+varip int barsSinceCross = 0
+varip int lastEntryBar = -1
+varip bool yaEntroEnEsteCruce = false
 
-var int bars_since_cross = 0
+bool isLateral = not (filtroAdx and filtroChop)
 
-if cruceAlcistaEmas
+// Resetear el candado si hubo cruce direccional opuesto
+if cruceAlcistaEmas and currentTrend != 1
     currentTrend := 1
-    bars_since_cross := 0
+    yaEntroEnEsteCruce := false
+    barsSinceCross := 0
     lastPositionExitPrice := 0.0 // Reiniciar tracking de la tendencia
-    dynamic_tp_activated := false
-    original_tp := na
-else if cruceBajistaEmas
+else if cruceBajistaEmas and currentTrend != -1
     currentTrend := -1
-    bars_since_cross := 0
+    yaEntroEnEsteCruce := false
+    barsSinceCross := 0
     lastPositionExitPrice := 0.0 // Reiniciar tracking de la tendencia
-    dynamic_tp_activated := false
-    original_tp := na
 else if currentTrend != 0
-    bars_since_cross += 1
+    barsSinceCross += 1
 
 
 // Actualizar lastPositionExitPrice tras un cierre
-var int last_trades_count = 0
-if strategy.closedtrades > last_trades_count
+var int lastTradesCount = 0
+var int lastExitBar = 0
+if strategy.closedtrades > lastTradesCount
     lastPositionExitPrice := strategy.closedtrades.exit_price(strategy.closedtrades - 1)
-    last_trades_count := strategy.closedtrades
+    lastTradesCount := strategy.closedtrades
+    lastExitBar := bar_index
 
 //====================================================================
 // LÓGICA DE SALIDA (FORZADA)
@@ -139,184 +234,233 @@ salidaCompra = (emaR < emaL and emaR[1] >= emaL[1]) or (close < emaL)
 salidaVenta = (emaR > emaL and emaR[1] <= emaL[1]) or (close > emaL)
 
 if strategy.position_size > 0 and salidaCompra
-    strategy.close("Buy", comment="Cierre Forzado")
+    string symbol_to_send_close = pcSymbol == "" ? syminfo.ticker : pcSymbol
+    string alert_msg_close = '{"strategy": "2EMAs", "ticker": "' + symbol_to_send_close + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(math.abs(strategy.position_size)) + ', "action": "close"}'
+    strategy.close("Buy", comment="Cierre Forzado", alert_message=usePc ? alert_msg_close : "")
     lastPositionExitPrice := close
 if strategy.position_size < 0 and salidaVenta
-    strategy.close("Sell", comment="Cierre Forzado")
+    string symbol_to_send_close = pcSymbol == "" ? syminfo.ticker : pcSymbol
+    string alert_msg_close = '{"strategy": "2EMAs", "ticker": "' + symbol_to_send_close + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(math.abs(strategy.position_size)) + ', "action": "close"}'
+    strategy.close("Sell", comment="Cierre Forzado", alert_message=usePc ? alert_msg_close : "")
     lastPositionExitPrice := close
+
+//====================================================================
+// LÍMITE DE PÉRDIDA DIARIA (Daily Drawdown)
+//====================================================================
+var float startOfDayEquity = strategy.equity
+var int currentDay = dayofmonth(time)
+
+if dayofmonth(time) != currentDay
+    startOfDayEquity := strategy.equity
+    currentDay := dayofmonth(time)
+
+float currentDailyDrawdown = ((strategy.equity - startOfDayEquity) / startOfDayEquity) * 100
+bool dailyLossLimitHit = currentDailyDrawdown <= -maxDailyLossPercent
+
+// Opcional: mostrar un color de fondo para indicar que se apagó el bot
+bgcolor(dailyLossLimitHit ? color.new(color.red, 90) : na, title="Bloqueo por Drawdown Diario")
 
 //====================================================================
 // LÓGICA DE ENTRADA (TENDENCIA VIVA Y RE-ENTRADAS)
 //====================================================================
-if strategy.position_size == 0 and currentTrend != 0 and not is_lateral and filtro_sesion and filtro_volumen
+if strategy.position_size == 0 and currentTrend != 0 and not isLateral and filtroSesion and filtroVolumen and not dailyLossLimitHit and (bar_index - lastExitBar) >= velasDescanso and not yaEntroEnEsteCruce
     bool macroAllowed = true
     
     // --- SEÑAL ALCISTA ---
-    if currentTrend == 1
+    if currentTrend == 1 and pendienteRapida > pendienteMin 
         // El gatillo es que la vela anterior haya cerrado verde y roto/estado sobre la EMA
-        velaPreviaVerde = close[1] > open[1]
+        velaPrevia := close[1] > open[1]
         rompioArriba = high[1] > emaR[1]
         cierraSobreEmaL = close[1] > emaL[1]
         
         if bloqueoXtendencia and macroTrend == -1
             macroAllowed := false
             
-        if rompioArriba and pendiente_rapida > pendienteMin and macroAllowed and velaPreviaVerde and cierraSobreEmaL
+        if rompioArriba and pendienteRapida > pendienteMin and macroAllowed and velaPrevia and cierraSobreEmaL
             
-            float effectiveRRMultTP = rrMult
+            float effectivetpRRMultTP = tpRRMult
             if macroTrend == -1
-                effectiveRRMultTP *= proporcionRRcontraria
+                effectivetpRRMultTP *= proporcionRRcontraria
                 
-            if lastPositionExitPrice == 0.0
-                slPrice := close - (atrVal * rrMult)
-            else
-                if lastPositionExitPrice < close
-                    slPrice := lastPositionExitPrice
-                else
-                    slPrice := close - (atrVal * (rrMult / intraRR))
+            slPrice := close - (atrVal * slAtrMult)
+            // Fallback de baja volatilidad: si emaR está más lejos (más abajo), la usamos como SL mínimo
+           
                     
-            tpPrice := close + (effectiveRRMultTP * atrVal)
-            original_tp := tpPrice
-            current_rr_mult := effectiveRRMultTP
+            tpPrice := close + (effectivetpRRMultTP * atrVal)
             
-            // Cálculo de Lotes Dinámico
-            riesgo_monetario = strategy.equity * (riskPercent / 100)
-            distancia_sl = math.abs(close - slPrice)
-            qty_correct = distancia_sl > 0 ? riesgo_monetario / distancia_sl : 0
+            // --- APLICACIÓN DE HOLGURA (SPREAD ALLOWANCE) ---
+            tpPrice := tpPrice - (spreadTicks * syminfo.mintick)
+            slPrice := slPrice + (spreadTicks * syminfo.mintick)
             
-            entry_atr := atrVal
-            strategy.entry("Buy", strategy.long, qty=qty_correct)
-            strategy.exit("Exit Buy", "Buy", stop=slPrice, limit=tpPrice)
+            
+            originalTp := tpPrice
+            currentRrMult := effectivetpRRMultTP
+            beActivated := false
+            dynamicTpActivated := false
+            
+            // Cálculo de Lotes Dinámico Universal
+            riesgoMonetario = strategy.equity * (riskPercent / 100)
+            distanciaSl = math.abs(close - slPrice)
+            rawQty = distanciaSl > 0 ? (riesgoMonetario / (distanciaSl * syminfo.pointvalue)) : 0
+            qtyCorrect = math.max(1, math.round(rawQty)) // FOREX.com solo acepta enteros en BTC y otros CFDs
+            
+            if bar_index > lastEntryBar
+                // REDONDEO FINAL PARA LA SEÑAL Y EL BROKER
+                slPrice := math.round_to_mintick(slPrice)
+                tpPrice := math.round_to_mintick(tpPrice)
+                
+                entryAtr := atrVal
+                string symbol_to_send = pcSymbol == "" ? syminfo.ticker : pcSymbol
+                string my_alert_msg_buy = '{"strategy": "2EMAs", "ticker": "' + symbol_to_send + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(qtyCorrect, "#.##") + ', "entry": ' + str.tostring(close, format.mintick) + ', "SL": ' + str.tostring(slPrice, format.mintick) + ', "TP": ' + str.tostring(tpPrice, format.mintick) + ', "action": "buy"}'
+                cached_alert_msg_close_buy := '{"strategy": "2EMAs", "ticker": "' + symbol_to_send + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(qtyCorrect, "#.##") + ', "action": "close"}'
+                strategy.entry("Buy", strategy.long, qty=qtyCorrect, alert_message=usePc ? my_alert_msg_buy : "")
+                lastEntryBar := bar_index
+                beActivated := false
+                dynamicTpActivated := false
+                yaEntroEnEsteCruce := true
+                
+            strategy.exit("Exit Buy", "Buy", stop=slPrice, limit=tpPrice, alert_message=usePc ? cached_alert_msg_close_buy : "")
 
     // --- SEÑAL BAJISTA ---
-    if currentTrend == -1
-        velaPreviaRoja = close[1] < open[1]
+    if currentTrend == -1 and pendienteRapida < -pendienteMin 
+        velaPrevia := close[1] < open[1]
         rompioAbajo = low[1] < emaR[1]
         cierraBajoEmaL = close[1] < emaL[1]
         
         if bloqueoXtendencia and macroTrend == 1
             macroAllowed := false
             
-        if rompioAbajo and pendiente_rapida < -pendienteMin and macroAllowed and velaPreviaRoja and cierraBajoEmaL
+        if rompioAbajo and pendienteRapida < -pendienteMin and macroAllowed and velaPrevia and cierraBajoEmaL
             
-            float effectiveRRMultTP = rrMult
+            float effectivetpRRMultTP = tpRRMult
             if macroTrend == 1
-                effectiveRRMultTP *= proporcionRRcontraria
+                effectivetpRRMultTP *= proporcionRRcontraria
                 
-            if lastPositionExitPrice == 0.0
-                slPrice := close + (atrVal * rrMult)
-            else
-                if lastPositionExitPrice > close
-                    slPrice := lastPositionExitPrice
-                else
-                    slPrice := close + (atrVal * (rrMult / intraRR))
+            slPrice := close + (atrVal * slAtrMult)
+            // Fallback de baja volatilidad: si emaR está más lejos (más arriba), la usamos como SL mínimo
+            slPrice := math.max(slPrice, emaR)
                     
-            tpPrice := close - (effectiveRRMultTP * atrVal)
-            original_tp := tpPrice
-            current_rr_mult := effectiveRRMultTP
+            tpPrice := close - (effectivetpRRMultTP * atrVal)
             
-            // Cálculo de Lotes Dinámico
-            riesgo_monetario = strategy.equity * (riskPercent / 100)
-            distancia_sl = math.abs(slPrice - close)
-            qty_correct = distancia_sl > 0 ? riesgo_monetario / distancia_sl : 0
+            // --- APLICACIÓN DE HOLGURA (SPREAD ALLOWANCE) ---
+            tpPrice := tpPrice + (spreadTicks * syminfo.mintick)
+            slPrice := slPrice - (spreadTicks * syminfo.mintick)
             
-            entry_atr := atrVal
-            strategy.entry("Sell", strategy.short, qty=qty_correct)
-            strategy.exit("Exit Sell", "Sell", stop=slPrice, limit=tpPrice)
-
+            originalTp := tpPrice
+            currentRrMult := effectivetpRRMultTP
+            beActivated := false
+            dynamicTpActivated := false
+            
+            // Cálculo de Lotes Dinámico Universal
+            riesgoMonetario = strategy.equity * (riskPercent / 100)
+            distanciaSl = math.abs(slPrice - close)
+            rawQty = distanciaSl > 0 ? (riesgoMonetario / (distanciaSl * syminfo.pointvalue)) : 0
+            qtyCorrect = math.max(1, math.round(rawQty)) // FOREX.com solo acepta enteros en BTC y otros CFDs
+            
+            if bar_index > lastEntryBar
+                // REDONDEO FINAL PARA LA SEÑAL Y EL BROKER
+                slPrice := math.round_to_mintick(slPrice)
+                tpPrice := math.round_to_mintick(tpPrice)
+                
+                entryAtr := atrVal
+                string symbol_to_send = pcSymbol == "" ? syminfo.ticker : pcSymbol
+                string my_alert_msg_sell = '{"strategy": "2EMAs", "ticker": "' + symbol_to_send + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(qtyCorrect, "#.##") + ', "entry": ' + str.tostring(close, format.mintick) + ', "SL": ' + str.tostring(slPrice, format.mintick) + ', "TP": ' + str.tostring(tpPrice, format.mintick) + ', "action": "sell"}'
+                cached_alert_msg_close_sell := '{"strategy": "2EMAs", "ticker": "' + symbol_to_send + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(qtyCorrect, "#.##") + ', "action": "close"}'
+                strategy.entry("Sell", strategy.short, qty=qtyCorrect, alert_message=usePc ? my_alert_msg_sell : "")
+                lastEntryBar := bar_index
+                beActivated := false
+                dynamicTpActivated := false
+                yaEntroEnEsteCruce := true
+                
+            strategy.exit("Exit Sell", "Sell", stop=slPrice, limit=tpPrice, alert_message=usePc ? cached_alert_msg_close_sell : "")
+    
+    
+    //string debugTxt = "Vela: " + (velaPrevia ? "Roja " : "Verde "+ str.tostring(pendienteRapida, "#.##") )
+    //label.new(bar_index, high + (atrVal * 2), debugTxt, color=color.black, textcolor=color.white, style=label.style_label_down, size=size.small)
 //====================================================================
-// GESTIÓN DINÁMICA (BREAK EVEN Y TRAILING TP)
+// GESTIÓN DINÁMICA (BREAK EVEN Y TRAILING TP) {{strategy.order.alert_message}}
 //====================================================================
 if strategy.position_size != 0
-    float entry_price = strategy.opentrades.entry_price(strategy.opentrades - 1)
+    entryPrice := strategy.opentrades.entry_price(strategy.opentrades - 1)
     
     // COMPRAS
+    
     if strategy.position_size > 0
         // El TP se queda fijo como se calculó al entrar
-        slPrice := math.max(emaL, slPrice) 
-        if not dynamic_tp_activated
-            tpPrice := original_tp
-
-        //float meta_be = entry_price + ((original_tp - entry_price) * 0.6) // 3/5
+        // Le damos 0.5 ATR de "colchón" bajo la EMA para que las mechas no te saquen
+        //slPrice := beActivated?math.max(emaL , slPrice):math.min(math.max(emaL , slPrice),emaR)
+        slPrice := math.max(emaL,slPrice)
+        if not dynamicTpActivated
+            tpPrice := originalTp
+        //slPrice := emaL
+        metaBe := entryPrice + ((originalTp - entryPrice) * 0.51) // 3/5
         
         // 1. Lógica Break Even (60% de camino) - SL sube a BE y se congela
-        //if not be_activated and high >= meta_be
-        //    be_activated := true
-       //     slPrice := math.max(entry_price, emaL)
+        if not beActivated and high >= metaBe
+            beActivated := true
+            slPrice := math.max(slPrice, emaL)
             
             
-        // 2. Lógica TP Trailing (Cazador por la espalda suavizado con EMA)
-        if not dynamic_tp_activated and high >= (original_tp - (15 * syminfo.mintick))
-            dynamic_tp_activated := true
-            tpPrice := high + (entry_atr * atrDynamicTP) // El TP se pega al precio a 0.5 ATR
+        // 2. Lógica TP Trailing (Se activa mucho antes, junto con el Break Even)
+        if not dynamicTpActivated and high >= metaBe
+            dynamicTpActivated := true
+            tpPrice := high + (atrVal * atrDynamicTP)
             
             
-        if dynamic_tp_activated          
-            tpPrice := math.max(tpPrice, high + (entry_atr * atrDynamicTP))
-
+        if dynamicTpActivated          
+            tpPrice := math.max(tpPrice, high + (atrVal * atrDynamicTP))
+            //slPrice := math.min(emaL,math.max(slPrice, high - slDistancia))
+            
         
-        strategy.exit("Exit Buy", "Buy", stop=slPrice, limit=tpPrice)
+        slPrice := math.round_to_mintick(slPrice)
+        tpPrice := math.round_to_mintick(tpPrice)
+        strategy.exit("Exit Buy", "Buy", stop=slPrice, limit=tpPrice, alert_message=usePc ? cached_alert_msg_close_buy : "")
 
     // VENTAS
     if strategy.position_size < 0
-        slPrice := math.min(slPrice, emaL)   
+        // Le damos 0.5 ATR de "colchón" sobre la EMA para que las mechas no te saquen
+        //slPrice := beActivated?math.min(slPrice, emaL ):math.max(math.min(slPrice, emaL ),emaR )  
         // El TP se queda fijo como se calculó al entrar
-        if not dynamic_tp_activated
-            tpPrice := original_tp
+        slPrice := math.min(emaL,slPrice)
+        if not dynamicTpActivated
+            tpPrice := originalTp
 
-        //float meta_be = entry_price - ((entry_price - original_tp) * 0.6) // 3/5
+        metaBe := entryPrice - ((entryPrice - originalTp) * 0.51) // un poco mas de la mitad
         
         // 1. Lógica Break Even (60% de camino) - SL baja a BE y se congela
-       // if not be_activated and low <= meta_be
-       //     be_activated := true
-       //     slPrice := math.min(entry_price, emaL)
+        if not beActivated and low <= metaBe
+            beActivated := true
+            slPrice := math.min(slPrice, emaL)
             
-        // 2. Lógica TP Trailing (Cazador por la espalda suavizado con EMA)
-        if not dynamic_tp_activated and low <= (original_tp + (15 * syminfo.mintick))
-            dynamic_tp_activated := true
-            tpPrice := low - (entry_atr * atrDynamicTP) // El TP se pega al precio a 0.5 ATR
-            if not be_activated 
-                slPrice := emaL // Sigue a la EMA fielmente siempre            
+        // 2. Lógica TP Trailing (Se activa mucho antes, junto con el Break Even)
+        if not dynamicTpActivated and low <= metaBe
+            dynamicTpActivated := true
+            tpPrice := low - (atrVal * atrDynamicTP)
             
-        if dynamic_tp_activated        
-            tpPrice := math.min(tpPrice, low - (entry_atr * atrDynamicTP))       
+
+        if dynamicTpActivated        
+            tpPrice := math.min(tpPrice, low - (atrVal * atrDynamicTP)) 
+            //slPrice := math.min(slPrice, low + slDistancia)
+                  
         
-            
-        strategy.exit("Exit Sell", "Sell", stop=slPrice, limit=tpPrice)
+        slPrice := math.round_to_mintick(slPrice)
+        tpPrice := math.round_to_mintick(tpPrice)    
+        strategy.exit("Exit Sell", "Sell", stop=slPrice, limit=tpPrice, alert_message=usePc ? cached_alert_msg_close_sell : "")
 else
-    be_activated := false
-    dynamic_tp_activated := false
+    beActivated := false
+    dynamicTpActivated := false
 
 //====================================================================
 // DIBUJADO DE TP Y SL EN PANTALLA
 //====================================================================
 inTrade = strategy.position_size != 0
-current_entry_price = inTrade ? strategy.opentrades.entry_price(strategy.opentrades - 1) : na
+currentEntryPrice = inTrade ? strategy.opentrades.entry_price(strategy.opentrades - 1) : na
 
-p_sl = plot(inTrade ? slPrice : na, "Stop Loss", color=color.red, linewidth=2, style=plot.style_linebr)
-p_tp = plot(inTrade ? tpPrice : na, "Take Profit", color=color.green, linewidth=2, style=plot.style_linebr)
-p_entry = plot(current_entry_price, "Precio de Entrada", color=na, style=plot.style_linebr)
+pSl = plot(inTrade ? slPrice : na, "Stop Loss", color=color.red, linewidth=2, style=plot.style_linebr)
+pTp = plot(inTrade ? tpPrice : na, "Take Profit", color=color.green, linewidth=2, style=plot.style_linebr)
+pEntry = plot(currentEntryPrice, "Precio de Entrada", color=na, style=plot.style_linebr)
 
-fill(p_entry, p_sl, color=color.new(color.red, 85), title="Fondo SL")
-fill(p_entry, p_tp, color=color.new(color.green, 85), title="Fondo TP")
+fill(pEntry, pSl, color=color.new(color.red, 85), title="Fondo SL")
+fill(pEntry, pTp, color=color.new(color.green, 85), title="Fondo TP")
 
-//====================================================================
-// ALERTAS DE PINECONNECTOR
-//====================================================================
-var float prev_pos = 0.0
-if use_pc and strategy.position_size != prev_pos
-    symbol_to_send = pc_symbol == "" ? syminfo.ticker : pc_symbol
-    if strategy.position_size > 0 and prev_pos <= 0
-        alert_msg = pc_license_id + ",buy," + symbol_to_send + ",risk=" + str.tostring(riskPercent) + ",sl_price=" + str.tostring(slPrice) + ",tp_price=" + str.tostring(tpPrice)
-        alert(alert_msg, alert.freq_once_per_bar)
-    else if strategy.position_size < 0 and prev_pos >= 0
-        alert_msg = pc_license_id + ",sell," + symbol_to_send + ",risk=" + str.tostring(riskPercent) + ",sl_price=" + str.tostring(slPrice) + ",tp_price=" + str.tostring(tpPrice)
-        alert(alert_msg, alert.freq_once_per_bar)
-    else if strategy.position_size == 0
-        if prev_pos > 0
-            alert_msg = pc_license_id + ",closelong," + symbol_to_send
-            alert(alert_msg, alert.freq_once_per_bar)
-        else if prev_pos < 0
-            alert_msg = pc_license_id + ",closeshort," + symbol_to_send
-            alert(alert_msg, alert.freq_once_per_bar)
-    prev_pos := strategy.position_size
+// --- FIN DEL SCRIPT ---

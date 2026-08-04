@@ -1,0 +1,153 @@
+//@version=6
+strategy('Supertrend EMA', overlay = true, initial_capital = 500, margin_long = 1, margin_short = 1, calc_on_every_tick=true, max_boxes_count = 500, max_labels_count = 500, max_lines_count = 500)
+
+// --- PARÁMETROS E INTERRUPTORES ---
+var float riesgoPerc = 2.0
+var float minRR = 1.5
+
+// Parámetros de Indicadores
+var int emaFastPeriod = 9
+var int emaSlowPeriod = 21
+var int atrPeriod = 10
+var float factor = 3.0
+
+// --- PARÁMETROS DE PINECONNECTOR ---
+var bool usePc = true
+var string pcLicenseId = "9093998805205"
+var string pcSymbol = "" 
+
+// --- DETECCIÓN DE INSTRUMENTO Y MULTIPLICADORES (Adaptativo) ---
+
+isSilver = str.contains(str.upper(syminfo.ticker), "XAG") or str.contains(str.upper(syminfo.ticker), "SILVER")
+isGold   = str.contains(str.upper(syminfo.ticker), "XAU") or str.contains(str.upper(syminfo.ticker), "GOLD")
+isCrypto = syminfo.type == "crypto"
+
+// Factores K (Optimizados por activo)
+atrMult = isCrypto ? 2.5 : isSilver ? 2.2 : isGold ? 1.8 : 1.5
+volMult = isCrypto ? 1.0 : isSilver ? 1.1 : isGold ? 1.1 : 1.1
+
+// Restricción de Sesión NY
+nyTime = hour(time, "America/New_York") * 100 + minute(time, "America/New_York")
+enSesion = isCrypto or (nyTime >= 930 and nyTime <= 1600)
+
+// --- INDICADORES BÁSICOS ---
+emaFast  = ta.ema(close, emaFastPeriod)
+emaSlow = ta.ema(close, emaSlowPeriod)
+atrVal = ta.atr(14)
+volSma = ta.sma(volume, 20)
+tieneVol = not na(volume) and volume > 0
+volAlto = tieneVol ? (ta.highest(volume, 3) > (volSma * volMult)) : true
+
+// --- SUPERTREND ---
+[superTrend, direction] = ta.supertrend(factor, atrPeriod)
+// direction: -1 es tendencia alcista (buy), 1 es tendencia bajista (sell)
+isSupertrendBullish = direction < 0
+isSupertrendBearish = direction > 0
+
+// --- SEÑALES DE ENTRADA ---
+cruceAlcista = ta.crossover(emaFast, emaSlow)
+cruceBajista = ta.crossunder(emaFast, emaSlow)
+
+// Reglas de la imagen: EMA 9 cruza la 21 Y Supertrend da señal a favor
+longCond = cruceAlcista and isSupertrendBullish and enSesion and volAlto
+shortCond = cruceBajista and isSupertrendBearish and enSesion and volAlto
+
+// Bloquear entradas contrarias si ya estamos en un trade
+inLong = strategy.position_size > 0
+inShort = strategy.position_size < 0
+
+var float originalTp = na
+var float slIni = na
+var float currentRrMult = na
+
+if strategy.position_size == 0
+    if longCond and not inShort
+        slIni := close - (atrVal * atrMult)
+        float tpFijo = close + (close - slIni) * minRR
+        originalTp := tpFijo
+        currentRrMult := minRR * atrMult 
+        
+        // Position Sizing basado en Riesgo Fijo
+        distanciaSl = math.abs(close - slIni)
+        riesgoMonetario = strategy.equity * (riesgoPerc / 100)
+        qtyCorrect = distanciaSl > 0 ? riesgoMonetario / distanciaSl : 0
+        strategy.entry("Buy", strategy.long, qty = qtyCorrect)
+        
+    if shortCond and not inLong
+        slIni := close + (atrVal * atrMult)
+        float tpFijo = close - (slIni - close) * minRR
+        originalTp := tpFijo
+        currentRrMult := minRR * atrMult
+        
+        // Position Sizing basado en Riesgo Fijo
+        distanciaSl = math.abs(slIni - close)
+        riesgoMonetario = strategy.equity * (riesgoPerc / 100)
+        qtyCorrect = distanciaSl > 0 ? riesgoMonetario / distanciaSl : 0
+        strategy.entry("Sell", strategy.short, qty = qtyCorrect)
+
+
+// --- GESTIÓN DINÁMICA (Visual y Salidas) ---
+var float tpPrice = na
+var float slPrice = na
+
+if strategy.position_size != 0
+    float entryPrice = strategy.opentrades.entry_price(strategy.opentrades - 1)
+    
+    // Al igual que en las otras estrategias, el TP respira con el ATR actual
+    if strategy.position_size > 0
+        originalTp := entryPrice + (currentRrMult * atrVal)
+        tpPrice := originalTp
+        slPrice := slIni 
+        
+        strategy.exit("Exit Buy", "Buy", stop=slPrice, limit=tpPrice)
+
+    if strategy.position_size < 0
+        originalTp := entryPrice - (currentRrMult * atrVal)
+        tpPrice := originalTp
+        slPrice := slIni
+        
+        strategy.exit("Exit Sell", "Sell", stop=slPrice, limit=tpPrice)
+else
+    tpPrice := na
+    slPrice := na
+
+
+// --- GRÁFICOS ---
+// EMAs
+plot(emaFast, "EMA 9", color=color.green, linewidth=2)
+plot(emaSlow, "EMA 21", color=color.red, linewidth=2)
+
+// Supertrend
+upTrend = plot(isSupertrendBullish ? superTrend : na, "Up Trend", color=color.green, style=plot.style_linebr, linewidth=2)
+downTrend = plot(isSupertrendBearish ? superTrend : na, "Down Trend", color=color.red, style=plot.style_linebr, linewidth=2)
+
+// Cajas de Riesgo Visuales con fill()
+inTrade = strategy.position_size != 0
+currentEntryPrice = inTrade ? strategy.opentrades.entry_price(strategy.opentrades - 1) : na
+
+pSl = plot(inTrade ? slPrice : na, "Stop Loss", color=color.red, linewidth=1, style=plot.style_linebr)
+pTp = plot(inTrade ? tpPrice : na, "Take Profit", color=color.green, linewidth=1, style=plot.style_linebr)
+pEntry = plot(currentEntryPrice, "Precio de Entrada", color=na, style=plot.style_linebr)
+
+fill(pEntry, pSl, color=color.new(color.red, 85), title="Fondo SL")
+fill(pEntry, pTp, color=color.new(color.green, 85), title="Fondo TP")
+
+
+// --- PINECONNECTOR ---
+var float prevPos = 0.0
+if usePc and strategy.position_size != prevPos
+    symbolToSend = pcSymbol == "" ? syminfo.ticker : pcSymbol
+    if strategy.position_size > 0 and prevPos <= 0
+        alertMsg = pcLicenseId + ",buy," + symbolToSend + ",risk=" + str.tostring(riesgoPerc) + ",sl_price=" + str.tostring(slIni) + ",tp_price=" + str.tostring(tpPrice)
+        alert(alertMsg, alert.freq_once_per_bar)
+    else if strategy.position_size < 0 and prevPos >= 0
+        alertMsg = pcLicenseId + ",sell," + symbolToSend + ",risk=" + str.tostring(riesgoPerc) + ",sl_price=" + str.tostring(slIni) + ",tp_price=" + str.tostring(tpPrice)
+        alert(alertMsg, alert.freq_once_per_bar)
+    else if strategy.position_size == 0
+        if prevPos > 0
+            alertMsg = pcLicenseId + ",closelong," + symbolToSend
+            alert(alertMsg, alert.freq_once_per_bar)
+        else if prevPos < 0
+            alertMsg = pcLicenseId + ",closeshort," + symbolToSend
+            alert(alertMsg, alert.freq_once_per_bar)
+    prevPos := strategy.position_size

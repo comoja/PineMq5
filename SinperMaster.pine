@@ -1,9 +1,7 @@
 //@version=6
-strategy('Sniper Master', overlay = true, initial_capital = 500, margin_long = 1, margin_short = 1)
+strategy('Sniper Master', overlay = true, initial_capital = 1500, margin_long = 1, margin_short = 1, max_boxes_count = 500, max_labels_count = 500, max_lines_count = 500)
 
 // --- PARÁMETROS E INTERRUPTORES ---
-riesgo_perc = input.float(2.0, "Riesgo por operación (%)")
-
 show_sar    = input.bool(true, "Mostrar SL Trail SAR (Rojo)")
 show_simple = input.bool(true, "Mostrar SL Trail Simple (Guinda)")
 
@@ -11,17 +9,78 @@ show_simple = input.bool(true, "Mostrar SL Trail Simple (Guinda)")
 use_pc         = input.bool(true, "Enviar alertas a PineConnector", group="PineConnector")
 pc_license_id  = input.string("9093998805205", "PineConnector License ID", group="PineConnector")
 pc_symbol      = input.string("", "Símbolo en MT5 (Vacío = Default)", group="PineConnector")
+market_id_input= input.string("", "Market ID (Para FOREX.com)", group="PineConnector")
+spread_ticks   = input.float(0.0, "Spread / Holgura (Ticks)", group="PineConnector")
 
-// --- DETECCIÓN DE INSTRUMENTO Y TF ---
-isSilver = str.contains(str.upper(syminfo.ticker), "XAG")    or str.contains(str.upper(syminfo.ticker), "SILVER")
-isGold   = str.contains(str.upper(syminfo.ticker), "XAU")    or str.contains(str.upper(syminfo.ticker), "GOLD")
-isCrypto = syminfo.type == "crypto"
-targetTF = isCrypto ? "60" : isSilver or isGold ? "30" : "15"
+// --- VARIABLES GLOBALES Y ADAPTATIVAS ---
+var float riesgo_perc = 0.5
+var float maxDailyLossPercent = 2.0
+var float atr_mult = 1.5
+var float minRR = 2.0
+var bool useSessionFilter = false
+var string sessionTime = "0930-1600"
+var bool useVolumeFilter = false
+var float vol_mult = 1.0
+
+var string targetTF = "15"
+var bool isGold = false
+var bool isSilver = false
+var bool isCrypto = false
+
+if barstate.isfirst
+    string t = str.upper(syminfo.ticker)
+    
+    // 1. ORO (Ecosistema Institucional)
+    if str.contains(t, "XAU") or str.contains(t, "GOLD")
+        isGold := true
+        targetTF := "30"
+        riesgo_perc := 0.5
+        atr_mult := 1.8
+        minRR := 2.8
+        useSessionFilter := true
+        sessionTime := "0800-1600"
+        useVolumeFilter := true
+        vol_mult := 1.1
+        
+    // 2. PLATA (Ecosistema Especulativo)
+    else if str.contains(t, "XAG") or str.contains(t, "SILVER")
+        isSilver := true
+        targetTF := "15"
+        riesgo_perc := 0.25
+        atr_mult := 2.2
+        minRR := 3.5
+        useSessionFilter := true
+        sessionTime := "0800-1600"
+        useVolumeFilter := true
+        vol_mult := 1.1
+        
+    // 3. NASDAQ (Ecosistema Institucional)
+    else if str.contains(t, "NAS") or str.contains(t, "US100") or str.contains(t, "NQ")
+        targetTF := "15"
+        riesgo_perc := 0.5
+        atr_mult := 1.5
+        minRR := 2.5
+        useSessionFilter := true
+        sessionTime := "0930-1600"
+        useVolumeFilter := true
+        vol_mult := 1.1
+        
+    // 4. BITCOIN / CRYPTO (Ecosistema Especulativo)
+    else if str.contains(t, "BTC") or syminfo.type == "crypto"
+        isCrypto := true
+        targetTF := "60"
+        riesgo_perc := 0.25
+        atr_mult := 2.5
+        minRR := 3.0
+        useSessionFilter := false
+        useVolumeFilter := false
+        vol_mult := 1.0
+
 bool tf_ok = timeframe.period == targetTF  // informativo — ya NO bloquea entradas
-minRR       = isCrypto? 2:isGold or isSilver ? 1.6 : 1.2
+
 // --- INDICADORES ---
-emaVal = ta.ema(close,  140)
-[macdL, macdS, _] = ta.macd(close, 12, 26, 9)
+emaVal = ta.ema(close, 140)
+[macdL, macdS, _] = ta.macd(close, 8, 21, 5)
 
 atr    = ta.atr(14)
 [_, _, adx] = ta.dmi(14, 14)
@@ -35,88 +94,143 @@ var float sl_ini    = na
 var float pnl_hoy   = 0.0
 var int last_id     = 0
 var float slDinamico = na
+var float entry_atr = na
+var bool pasoLaMitad = false
+var float slTrailDist = na
 
 if ta.change(time("D")) != 0
     pnl_hoy := 0.0
 
-// --- LÓGICA DE ENTRADA ---
-// tf_ok es solo INFORMATIVO (tabla muestra advertencia si TF no es el ideal)
-// Las entradas se disparan en cualquier TF para no perder señales
-// Multiplicadores Específicos por Activo (Reglas Globales)
-atr_mult = isCrypto ? 2.5 : isSilver ? 2.5 : isGold ? 1.8 : 1.5
-vol_mult = isCrypto ? 1.0 : isSilver ? 1.1 : isGold ? 1.1 : 1.1
+// --- LÍMITE DE PÉRDIDA DIARIA (Daily Drawdown) ---
+var float start_of_day_equity = strategy.equity
+var int current_day = dayofmonth(time)
 
-// Restricción de Sesión (Solo NY para metales/índices)
-ny_time = hour(time, "America/New_York") * 100 + minute(time, "America/New_York")
-en_sesion = isCrypto or (ny_time >= 930 and ny_time <= 1600)
+if dayofmonth(time) != current_day
+    start_of_day_equity := strategy.equity
+    current_day := dayofmonth(time)
+
+float current_daily_drawdown = ((strategy.equity - start_of_day_equity) / start_of_day_equity) * 100
+bool daily_loss_limit_hit = current_daily_drawdown <= -maxDailyLossPercent
+
+bgcolor(daily_loss_limit_hit ? color.new(color.red, 90) : na, title="Bloqueo por Drawdown Diario")
+
+// --- LÓGICA DE ENTRADA ---
+// Filtros Condicionales por Ecosistema
+in_session = not na(time(timeframe.period, sessionTime, "America/New_York"))
+en_sesion = useSessionFilter ? in_session : true
 
 // Filtro de Volumen Inteligente (con bypass si el broker no provee volumen)
 tiene_vol = not na(volume) and volume > 0
-vol_alto = tiene_vol ? (ta.highest(volume, 3) > (vol_sma * vol_mult)) : true
+vol_alto = useVolumeFilter ? (tiene_vol ? (ta.highest(volume, 3) > (vol_sma * vol_mult)) : true) : true
 
 // Filtro Anti-Baile (Chop): Evitar entrar si el precio ha cruzado la EMA repetidamente
 cruces_ema = math.sum(ta.cross(close, emaVal) ? 1 : 0, 15)
 
-// Filtro General: Tendencia + Volatilidad + Horario + Anti-Chop
-filtro_tendencia = adx > 20 and cruces_ema < 3 and vol_alto and en_sesion
+// Filtro General: Tendencia + Volatilidad + Horario + Anti-Chop + Drawdown Limiter
+filtro_tendencia = adx > 18 and cruces_ema < 2 and vol_alto and en_sesion and not daily_loss_limit_hit
 
 // Cruces del MACD
 cruce_alcista = ta.crossover(macdL, macdS)
 cruce_bajista = ta.crossunder(macdL, macdS)
 
-// Memoria de 3 velas: El cruce ocurrió recientemente y el MACD sigue en la dirección correcta
-macd_long_valido = macdL > macdS and ta.barssince(cruce_alcista) <= 3
-macd_short_valido = macdL < macdS and ta.barssince(cruce_bajista) <= 3
+// Memoria de 1 vela: Obligamos al bot a entrar máximo 1 vela después del cruce, para no entrar tarde.
+macd_long_valido = macdL > macdS and ta.barssince(cruce_alcista) <= 1
+macd_short_valido = macdL < macdS and ta.barssince(cruce_bajista) <= 1
 
 longC  = macd_long_valido and low > emaVal and filtro_tendencia
 shortC = macd_short_valido and high < emaVal and filtro_tendencia
 
 if strategy.position_size == 0
     if longC
-        sl_ini := low - (atr * atr_mult*0.8)
+        sl_ini := low - (atr * atr_mult)        
         
-        sl_simple := sl_ini
         slDinamico := sl_ini
+        pasoLaMitad := false
+        slTrailDist := na
+        
+        entry_atr := atr
         tp_fijo := close + (close - sl_ini) * minRR
-        // Cálculo correcto de Lotes (Position Sizing)
+        
+        // --- APLICACIÓN DE HOLGURA (SPREAD ALLOWANCE) ---
+        tp_fijo := tp_fijo - (spread_ticks * syminfo.mintick)
+        sl_ini := sl_ini + (spread_ticks * syminfo.mintick)
+        slDinamico := sl_ini
+        // ------------------------------------------------
+        
+        // Cálculo correcto de Lotes (Position Sizing) Universal
         distancia_sl = math.abs(close - sl_ini)
         riesgo_monetario = strategy.equity * (riesgo_perc / 100)
-        qty_correct = distancia_sl > 0 ? riesgo_monetario / distancia_sl : 0
-        strategy.entry("Long", strategy.long, qty = qty_correct)
+        // Usar syminfo.pointvalue garantiza que funcione en Forex (USD/JPY) y Metales
+        qty_correct = distancia_sl > 0 ? riesgo_monetario / (distancia_sl * syminfo.pointvalue) : 0
+        string symbol_to_send = pc_symbol == "" ? syminfo.ticker : pc_symbol
+        string alert_msg_buy = '{"strategy": "SniperMaster", "ticker": "' + symbol_to_send + '", "market_id": "' + market_id_input + '", "quantity": ' + str.tostring(qty_correct) + ', "entry": ' + str.tostring(close) + ', "SL": ' + str.tostring(sl_ini) + ', "TP": ' + str.tostring(tp_fijo) + ', "action": "buy"}'
+        strategy.entry("Long", strategy.long, qty = qty_correct, alert_message=use_pc ? alert_msg_buy : "")
     if shortC
         sl_ini := high + (atr * atr_mult)
-       
-        sl_simple := sl_ini
+        
         slDinamico := sl_ini
+        pasoLaMitad := false
+        slTrailDist := na
+        
+        entry_atr := atr
         tp_fijo := close - (sl_ini - close) * minRR
-        // Cálculo correcto de Lotes (Position Sizing)
+        
+        // --- APLICACIÓN DE HOLGURA (SPREAD ALLOWANCE) ---
+        tp_fijo := tp_fijo + (spread_ticks * syminfo.mintick)
+        sl_ini := sl_ini - (spread_ticks * syminfo.mintick)
+        slDinamico := sl_ini
+        // ------------------------------------------------
+        
+        // Cálculo correcto de Lotes (Position Sizing) Universal
         distancia_sl = math.abs(sl_ini - close)
         riesgo_monetario = strategy.equity * (riesgo_perc / 100)
-        qty_correct = distancia_sl > 0 ? riesgo_monetario / distancia_sl : 0
-        strategy.entry("Short", strategy.short, qty = qty_correct)
+        // Usar syminfo.pointvalue garantiza que funcione en Forex (USD/JPY) y Metales
+        qty_correct = distancia_sl > 0 ? riesgo_monetario / (distancia_sl * syminfo.pointvalue) : 0
+        string symbol_to_send = pc_symbol == "" ? syminfo.ticker : pc_symbol
+        string alert_msg_sell = '{"strategy": "SniperMaster", "ticker": "' + symbol_to_send + '", "market_id": "' + market_id_input + '", "quantity": ' + str.tostring(qty_correct) + ', "entry": ' + str.tostring(close) + ', "SL": ' + str.tostring(sl_ini) + ', "TP": ' + str.tostring(tp_fijo) + ', "action": "sell"}'
+        strategy.entry("Short", strategy.short, qty = qty_correct, alert_message=use_pc ? alert_msg_sell : "")
+    
 
 // --- DIBUJO DE ETIQUETAS AL CAMBIAR POSICIÓN ---
 if ta.change(strategy.position_size) != 0 and strategy.position_size != 0
     esLong = strategy.position_size > 0
-    label.new(bar_index, tp_fijo, (esLong ? "COMPRA" : "VENTA") +" TP " + str.tostring(tp_fijo, format.mintick), color=color.green, textcolor=color.white, style=esLong?label.style_label_down:label.style_label_up, size=size.small)
-    label.new(bar_index, sl_ini, (esLong ? "COMPRA" : "VENTA") +" SL " + str.tostring(sl_ini, format.mintick), color=color.red, textcolor=color.white, style=esLong?label.style_label_up:label.style_label_down, size=size.small)
+    label.new(bar_index, tp_fijo, "SniperMaster", color=color.green, textcolor=color.white, style=esLong?label.style_label_down:label.style_label_up, size=size.small)
+    label.new(bar_index, sl_ini, "SniperMaster", color=color.red, textcolor=color.white, style=esLong?label.style_label_up:label.style_label_down, size=size.small)
    // label.new(bar_index, esLong ? low : high, (esLong ? "COMPRA" : "VENTA") + "\n" + str.tostring(math.abs(strategy.position_size), "#.###"), color=esLong?color.green:color.red, textcolor=color.white, style=esLong?label.style_label_up:label.style_label_down, yloc=esLong?yloc.belowbar:yloc.abovebar, size=size.small)
     line.new(bar_index, close, bar_index, tp_fijo, color=color.new(color.green, 50), style=line.style_dashed)
     line.new(bar_index, close, bar_index, sl_ini, color=color.new(color.red, 50), style=line.style_dashed)
 
 // --- TRAILING Y SALIDA ---
 if strategy.position_size != 0
+    float entry_price = strategy.opentrades.entry_price(strategy.opentrades - 1)
+    
+    // COMPRA
     if strategy.position_size > 0
-        if low - (atr * atr_mult) > sl_simple
-            sl_simple := low - (atr * atr_mult)        
-    else
-        if high + (atr * atr_mult) < sl_simple
-            sl_simple := high + (atr * atr_mult)
-//*************************************************
-    
-    slDinamico := isSilver or isGold?sl_simple:emaVal
-    
-    strategy.exit("Exit", stop = slDinamico, limit = tp_fijo)
+        float dist_sl_ini = entry_price - sl_ini
+        float dist_tp_ini = tp_fijo - entry_price
+        float ratio = dist_sl_ini / dist_tp_ini
+        
+        // El precio se mueve hacia arriba (ganancia)
+        if high > entry_price
+            float delta_p = high - entry_price
+            float possible_sl = sl_ini + (delta_p * ratio)
+            slDinamico := math.max(slDinamico, possible_sl)
+                
+    // VENTA
+    else if strategy.position_size < 0
+        float dist_sl_ini = sl_ini - entry_price
+        float dist_tp_ini = entry_price - tp_fijo
+        float ratio = dist_sl_ini / dist_tp_ini
+        
+        // El precio se mueve hacia abajo (ganancia)
+        if low < entry_price
+            float delta_p = entry_price - low
+            float possible_sl = sl_ini - (delta_p * ratio)
+            slDinamico := math.min(slDinamico, possible_sl)
+
+    string symbol_to_send = pc_symbol == "" ? syminfo.ticker : pc_symbol
+    string alert_msg_close = '{"strategy": "SniperMaster", "ticker": "' + symbol_to_send + '", "market_id": "' + market_id_input + '", "quantity": ' + str.tostring(math.abs(strategy.position_size)) + ', "action": "close"}'
+    strategy.exit("Exit", stop = slDinamico, limit = tp_fijo, alert_message=use_pc ? alert_msg_close : "")
 
 if strategy.closedtrades > last_id
     trade_pnl = strategy.closedtrades.profit(strategy.closedtrades - 1)
@@ -126,10 +240,15 @@ if strategy.closedtrades > last_id
 
 // --- DIBUJADO DINÁMICO ---
 inTrade = strategy.position_size != 0
-plot(emaVal, "EMA", color=color.blue, linewidth=1, style=plot.style_linebr)
-plot(inTrade  ? slDinamico : na, "SL Dinamico", color=color.red, linewidth=2, style=plot.style_linebr)
+current_entry_price = inTrade ? strategy.opentrades.entry_price(strategy.opentrades - 1) : na
 
-plot(inTrade ? tp_fijo : na, "TP", color=color.green, linewidth=1, style=plot.style_circles)
+plot(emaVal, "EMA", color=color.blue, linewidth=2, style=plot.style_linebr)
+p_sl = plot(inTrade  ? slDinamico : na, "SL Dinamico", color=color.red, linewidth=1, style=plot.style_linebr)
+p_tp = plot(inTrade ? tp_fijo : na, "TP", color=color.green, linewidth=1, style=plot.style_linebr)
+p_entry = plot(current_entry_price, "Precio de Entrada", color=na, style=plot.style_linebr)
+
+fill(p_entry, p_sl, color=color.new(color.red, 85), title="Fondo SL")
+fill(p_entry, p_tp, color=color.new(color.green, 85), title="Fondo TP")
 
 // --- TABLA DE CONTROL (SIN VAR PARA VISIBILIDAD) ---
 main_table = table.new(position.top_right, 2, 6, bgcolor=color.new(color.black, 0), border_width=1, border_color=color.gray)
@@ -147,22 +266,4 @@ if barstate.islast
     table.cell(main_table, 1, 4, tf_ok ? "ACTIVO" : "TF INCORRECTO", text_color=tf_color)
 
 
-// --- ALERTAS DE PINECONNECTOR ---
-var float prev_pos = 0.0
-if use_pc and strategy.position_size != prev_pos
-    symbol_to_send = pc_symbol == "" ? syminfo.ticker : pc_symbol
-    if strategy.position_size > 0 and prev_pos <= 0
-        alert_msg = pc_license_id + ",buy," + symbol_to_send + ",risk=" + str.tostring(riesgo_perc) + ",sl_price=" + str.tostring(sl_ini) + ",tp_price=" + str.tostring(tp_fijo)
-        alert(alert_msg, alert.freq_once_per_bar)
-    else if strategy.position_size < 0 and prev_pos >= 0
-        alert_msg = pc_license_id + ",sell," + symbol_to_send + ",risk=" + str.tostring(riesgo_perc) + ",sl_price=" + str.tostring(sl_ini) + ",tp_price=" + str.tostring(tp_fijo)
-        alert(alert_msg, alert.freq_once_per_bar)
-    else if strategy.position_size == 0
-        if prev_pos > 0
-            alert_msg = pc_license_id + ",closelong," + symbol_to_send
-            alert(alert_msg, alert.freq_once_per_bar)
-        else if prev_pos < 0
-            alert_msg = pc_license_id + ",closeshort," + symbol_to_send
-            alert(alert_msg, alert.freq_once_per_bar)
-    prev_pos := strategy.position_size
-
+// --- FIN DEL SCRIPT ---

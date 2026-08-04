@@ -1,0 +1,356 @@
+//@version=6
+strategy("liquidezIneficiencias", overlay=true, margin_long=100, margin_short=100, default_qty_type=strategy.percent_of_equity, default_qty_value=1)
+
+// =================================================================================================
+// PARÁMETROS DE PINECONNECTOR
+// =================================================================================================
+var bool usePc = true
+var string pcSymbol = ""
+marketIdInput = input.string("", "Market ID Opcional (Para FOREX.com)", group="PineConnector")
+// =================================================================================================
+// PARÁMETROS FIJOS (Sin Inputs)
+// =================================================================================================
+// Temporalidad mayor fijada en 4 horas (240 minutos)
+string htfString = "240"
+// Riesgo fijo en dinero (dólares) por cada operación
+float riskPerTrade = 10.0
+
+// =================================================================================================
+// 1. DETECCIÓN HTF (Temporalidad Mayor)
+// =================================================================================================
+// Importamos los datos de las velas de 4 horas. Se utiliza lookahead_off para evitar redibujado/repintado (que el bot vea el futuro)
+float htfCandle1_h = request.security(syminfo.tickerid, htfString, high[3], lookahead=barmerge.lookahead_off)
+float htfCandle3_l = request.security(syminfo.tickerid, htfString, low[1], lookahead=barmerge.lookahead_off)
+float htfCandle1_l = request.security(syminfo.tickerid, htfString, low[3], lookahead=barmerge.lookahead_off)
+float htfCandle3_h = request.security(syminfo.tickerid, htfString, high[1], lookahead=barmerge.lookahead_off)
+
+// Identificamos Fair Value Gaps (FVG) en la temporalidad de 4 horas
+// BISI (Buyside Imbalance Sellside Inefficiency): FVG Alcista (el alto de la vela 1 es menor que el bajo de la vela 3)
+bool isHtfBisi = htfCandle1_h < htfCandle3_l
+// CBI (Sellside Imbalance Buyside Inefficiency): FVG Bajista (el bajo de la vela 1 es mayor que el alto de la vela 3)
+bool isHtfCbi = htfCandle1_l > htfCandle3_h
+
+// Variables para almacenar las zonas del FVG de 4H activo
+var float activeHtfBisiTop = na
+var float activeHtfBisiBot = na
+var float activeHtfCbiTop = na
+var float activeHtfCbiBot = na
+
+// Si se detecta un FVG alcista (BISI) en 4H, guardamos su techo y suelo, y borramos el bajista
+if isHtfBisi
+    activeHtfBisiTop := htfCandle3_l
+    activeHtfBisiBot := htfCandle1_h
+    activeHtfCbiTop := na 
+
+// Si se detecta un FVG bajista (CBI) en 4H, guardamos su techo y suelo, y borramos el alcista
+if isHtfCbi
+    activeHtfCbiTop := htfCandle1_l
+    activeHtfCbiBot := htfCandle3_h
+    activeHtfBisiTop := na 
+
+// Invalidar FVG de 4H si el precio lo atraviesa completamente
+if not na(activeHtfBisiTop) and close < activeHtfBisiBot
+    activeHtfBisiTop := na
+    activeHtfBisiBot := na
+
+if not na(activeHtfCbiTop) and close > activeHtfCbiTop
+    activeHtfCbiTop := na
+    activeHtfCbiBot := na
+
+// Verificamos si el precio actual de la temporalidad menor se encuentra "dentro" del FVG de 4H
+bool insideHtfBisi = not na(activeHtfBisiTop) and close <= activeHtfBisiTop and close >= activeHtfBisiBot
+bool insideHtfCbi = not na(activeHtfCbiTop) and close <= activeHtfCbiTop and close >= activeHtfCbiBot
+
+// =================================================================================================
+// 1.5 DIBUJO DE TENDENCIA GUÍA (EMA 4H)
+// =================================================================================================
+// Dibujamos la EMA de 50 periodos de la temporalidad de 4H solo para tener una guía visual de la macro
+float ema4H = request.security(syminfo.tickerid, htfString, ta.ema(close, 50), lookahead=barmerge.lookahead_off)
+
+// =================================================================================================
+// 2. ESTRUCTURA LTF (Temporalidad Menor)
+// =================================================================================================
+// Calculamos los pivotes (Altos y Bajos) estructurales reales en la temporalidad menor
+int pivotLength = 5
+float ph = ta.pivothigh(high, pivotLength, pivotLength)
+float pl = ta.pivotlow(low, pivotLength, pivotLength)
+
+// Almacenamos el último alto y bajo confirmado de la estructura
+var float lastSwingHigh = na
+var float lastSwingLow = na
+
+if not na(ph)
+    lastSwingHigh := ph
+if not na(pl)
+    lastSwingLow := pl
+
+// Verificamos si hay un Rompimiento de Estructura (Break of Structure - BOS)
+bool bosBullish = ta.crossover(close, lastSwingHigh)
+bool bosBearish = ta.crossunder(close, lastSwingLow)
+
+// =================================================================================================
+// 2.2 RASTREO ESTRUCTURAL DINÁMICO (EL "PRIMER MÁXIMO/MÍNIMO HACIA ATRÁS")
+// =================================================================================================
+// Función que simula el ojo humano: busca el máximo más cercano que sea MAYOR al grupo del FVG
+getPrimerMaximo(fvgGroupHigh) =>
+    float tp = na
+    // Escaneamos hacia atrás empezando justo antes de las 3 velas del FVG
+    for i = 3 to 1000 
+        bool isPivot = true
+        // Verificamos si es un máximo local (pivote estándar de 5 velas a cada lado)
+        for j = 1 to 5
+            float pastHigh = nz(high[i+j])
+            float futureHigh = (i - j) >= 0 ? nz(high[i-j]) : 0.0
+            
+            if high[i] <= pastHigh or high[i] <= futureHigh
+                isPivot := false
+                break
+        
+        // Si es un pivote Y es mayor al grupo de velas del FVG, lo atrapamos y detenemos la búsqueda
+        if isPivot and high[i] > fvgGroupHigh
+            tp := high[i]
+            break
+            
+    // Fallback de seguridad
+    na(tp) ? high[0] : tp
+
+// Función inversa para el mínimo más cercano que sea MENOR al grupo del FVG (Ventas)
+getPrimerMinimo(fvgGroupLow) =>
+    float tp = na
+    for i = 3 to 1000 
+        bool isPivot = true
+        for j = 1 to 5
+            float pastLow = nz(low[i+j], 999999.0)
+            float futureLow = (i - j) >= 0 ? nz(low[i-j], 999999.0) : 999999.0
+            
+            if low[i] >= pastLow or low[i] >= futureLow
+                isPivot := false
+                break
+                
+        if isPivot and low[i] < fvgGroupLow
+            tp := low[i]
+            break
+            
+    na(tp) ? low[0] : tp
+
+// Datos de velas de la temporalidad actual (LTF) para detectar FVG locales
+float ltfHigh2 = high[2]
+float ltfLow0 = low[0]
+float ltfLow2 = low[2]
+float ltfHigh0 = high[0]
+
+// =================================================================================================
+// 2.5 CLASIFICACIÓN DE INTENCIÓN INSTITUCIONAL DE LA VELA 3 (Filtro Avanzado)
+// =================================================================================================
+float atr14 = ta.atr(14)
+float candle3Range = ltfHigh0 - ltfLow0
+float candle3Body = math.abs(close[0] - open[0])
+float bodyPct = candle3Range == 0 ? 0 : candle3Body / candle3Range
+
+// Cálculo de las mechas de la vela 3
+float upperWick = ltfHigh0 - math.max(close[0], open[0])
+float lowerWick = math.min(close[0], open[0]) - ltfLow0
+float upperWickPct = candle3Range == 0 ? 0 : upperWick / candle3Range
+float lowerWickPct = candle3Range == 0 ? 0 : lowerWick / candle3Range
+
+// Breakaway Gap (Fuerza Extrema, no ideal para rebote de FVG estándar)
+bool isBreakaway = bodyPct > 0.8 and candle3Range > (1.5 * atr14[1])
+
+// Trampa / Rechazo (Mecha representa > 50% de la vela total)
+bool isTrap = upperWickPct > 0.5 or lowerWickPct > 0.5
+
+// FVG de Alta Probabilidad (Consolidación / Pausa)
+bool isHighProb = bodyPct < 0.6 and not isBreakaway and not isTrap
+
+// Detectamos la creación de un FVG alcista o bajista en la temporalidad menor (SOLO de Alta Probabilidad)
+bool isLtfBisi = (ltfHigh2 < ltfLow0) and isHighProb
+bool isLtfCbi = (ltfLow2 > ltfHigh0) and isHighProb
+
+// Variables para los niveles clave del FVG local
+var float activeLtfBisiTop = na
+var float activeLtfBisiBot = na
+var float activeLtfBisi50 = na
+
+var float activeLtfCbiTop = na
+var float activeLtfCbiBot = na
+var float activeLtfCbi50 = na
+
+var int activeLtfBisiBar = na
+var int activeLtfCbiBar = na
+
+var float activeLtfBisiSl = na
+var float activeLtfBisiTp = na
+var float activeLtfBisiHigh = na
+var bool activeLtfBisiValidated = false
+
+var float activeLtfCbiSl = na
+var float activeLtfCbiTp = na
+var float activeLtfCbiLow = na
+var bool activeLtfCbiValidated = false
+
+// =================================================================================================
+// ESTADO DE TENDENCIA (1 Sola Variable)
+// =================================================================================================
+// 1 = Alcista, -1 = Bajista, 0 = Neutral
+var int marketTrend = 0
+
+// Si ocurre un BOS en 5m, verificamos que la tendencia mayor (EMA 4H) apoye el movimiento
+if bosBullish and close > ema4H
+    marketTrend := 1
+
+if bosBearish and close < ema4H
+    marketTrend := -1
+
+// Neutralizamos la tendencia si el precio cruza la EMA 4H en contra de nuestra dirección armada
+if marketTrend == 1 and close < ema4H
+    marketTrend := 0
+if marketTrend == -1 and close > ema4H
+    marketTrend := 0
+
+// Si se forma un FVG local (BISI) justo cuando la tendencia es Alcista (1), guardamos niveles
+if isLtfBisi and marketTrend == 1
+    activeLtfBisiTop := ltfLow0
+    activeLtfBisiBot := ltfHigh2
+    activeLtfBisi50 := (ltfLow0 + ltfHigh2) / 2
+    activeLtfBisiBar := bar_index
+    float fvgGroupLow = math.min(low[0], math.min(low[1], low[2]))
+    activeLtfBisiSl := getPrimerMinimo(fvgGroupLow) // Mínimo estructural real antes del FVG
+    float fvgGroupHigh = math.max(high[0], math.max(high[1], high[2]))
+    activeLtfBisiTp := getPrimerMaximo(fvgGroupHigh) // Máximo estructural real antes del FVG
+    activeLtfBisiHigh := high // El máximo de la vela que confirma el FVG
+    activeLtfBisiValidated := false // Aún no ha sido validado por una subida posterior
+
+// Si se forma un FVG bajista local (CBI) cuando la tendencia es Bajista (-1), guardamos niveles
+if isLtfCbi and marketTrend == -1
+    activeLtfCbiTop := ltfLow2
+    activeLtfCbiBot := ltfHigh0
+    activeLtfCbi50 := (ltfLow2 + ltfHigh0) / 2
+    activeLtfCbiBar := bar_index
+    float fvgGroupHighCbi = math.max(high[0], math.max(high[1], high[2]))
+    activeLtfCbiSl := getPrimerMaximo(fvgGroupHighCbi) // Máximo estructural real antes del FVG
+    float fvgGroupLowCbi = math.min(low[0], math.min(low[1], low[2]))
+    activeLtfCbiTp := getPrimerMinimo(fvgGroupLowCbi) // Mínimo estructural real antes del FVG
+    activeLtfCbiLow := low // El mínimo de la vela que confirma el FVG
+    activeLtfCbiValidated := false // Aún no ha sido validado por una bajada posterior
+
+// Dibujamos flechas en TODOS los FVG de 5m que vayan a favor de la línea negra (EMA 4H) sin importar la estrategia de entrada
+bool drawBuyArrow = isLtfBisi and close > ema4H
+bool drawSellArrow = isLtfCbi and close < ema4H
+plotshape(drawBuyArrow, title="FVG 5m Alcista (A favor EMA)", style=shape.arrowup, location=location.belowbar, color=color.green, size=size.normal)
+plotshape(drawSellArrow, title="FVG 5m Bajista (A favor EMA)", style=shape.arrowdown, location=location.abovebar, color=color.red, size=size.normal)
+
+// Dibujamos la línea negra de la EMA 4H SOLO cuando el estado es Activo (Alcista o Bajista). Si es Nulo, la ocultamos.
+color emaColor = marketTrend == 0 ? na : color.black
+plot(ema4H, color=emaColor, title="Tendencia Guía 4H", linewidth=3, style=plot.style_linebr)
+
+// =================================================================================================
+// 3. LÓGICA DE ENTRADA Y GESTIÓN
+// =================================================================================================
+bool longC = false
+bool shortC = false
+
+var float entrySlPrice = na
+var float entryTpPrice = na
+
+// Validación del FVG Alcista (debe superar el máximo de la vela creadora)
+if not na(activeLtfBisiTop) and not activeLtfBisiValidated
+    // Exigimos una vela verde (subida) que CIERRE por encima de la línea (cuerpo real, no mecha)
+    if close > open and close > activeLtfBisiHigh
+        activeLtfBisiValidated := true
+
+// Si tenemos un FVG alcista local esperando, disparamos entrada cuando el precio retrocede a tocarlo (en una vela posterior)
+if not na(activeLtfBisiTop) and bar_index > activeLtfBisiBar
+    if low <= activeLtfBisiBot // Si el precio toca el FONDO del FVG
+        // Exigimos que el FVG haya sido validado (el precio subió más allá de su creación) y que exista una vela de separación
+        if activeLtfBisiValidated and bar_index > activeLtfBisiBar + 1
+            longC := true
+            entrySlPrice := activeLtfBisiSl
+            entryTpPrice := activeLtfBisiTp
+        activeLtfBisiTop := na // El FVG fue mitigado (rellenado), lo limpiamos entremos o no
+
+// Validación del FVG Bajista (debe superar el mínimo de la vela creadora)
+if not na(activeLtfCbiTop) and not activeLtfCbiValidated
+    // Exigimos una vela roja (bajada) que CIERRE por debajo de la línea
+    if close < open and close < activeLtfCbiLow
+        activeLtfCbiValidated := true
+
+// Entrada corta cuando el precio sube a tocar el FVG bajista local (en una vela posterior)
+if not na(activeLtfCbiTop) and bar_index > activeLtfCbiBar
+    if high >= activeLtfCbiTop // Si el precio toca el TOPE del FVG
+        // Exigimos validación y separación
+        if activeLtfCbiValidated and bar_index > activeLtfCbiBar + 1
+            shortC := true
+            entrySlPrice := activeLtfCbiSl
+            entryTpPrice := activeLtfCbiTp
+        activeLtfCbiTop := na
+
+bool inLong = strategy.position_size > 0
+bool inShort = strategy.position_size < 0
+
+var float slPrice = na
+var float tpPrice = na
+var float entryPrice = na
+var box slBox = na
+var box tpBox = na
+
+// EJECUCIÓN DE COMPRA
+if longC and not inShort
+    entryPrice := close
+    // Stop Loss exacto en el origen del impulso (Inmediato)
+    slPrice := entrySlPrice
+    if na(slPrice) or slPrice >= entryPrice
+        slPrice := entryPrice - (syminfo.mintick * 10)
+        
+    // Calculamos la distancia del riesgo
+    float slDist = entryPrice - slPrice
+        
+    // Take Profit en el pico máximo antes del retroceso (Liquidez)
+    tpPrice := entryTpPrice 
+    if na(tpPrice) or tpPrice <= entryPrice
+        tpPrice := entryPrice + (slDist * 2) 
+    
+    // Calculamos el tamaño de la posición basándonos en los $100 fijos de riesgo
+    float qty = riskPerTrade / slDist
+    string symbol_to_send = pcSymbol == "" ? syminfo.ticker : pcSymbol
+    string alert_msg_buy = '{"strategy": "ImbalanceNY", "ticker": "' + symbol_to_send + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(qty) + ', "entry": ' + str.tostring(close) + ', "SL": ' + str.tostring(slPrice) + ', "TP": ' + str.tostring(tpPrice) + ', "action": "buy"}'
+    string alert_msg_close_buy = '{"strategy": "ImbalanceNY", "ticker": "' + symbol_to_send + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(qty) + ', "action": "close"}'
+    
+    strategy.entry("Buy", strategy.long, qty=qty, alert_message=usePc ? alert_msg_buy : "")
+    strategy.exit("Exit Buy", "Buy", stop=slPrice, limit=tpPrice, alert_message=usePc ? alert_msg_close_buy : "")
+    
+    // Dibujamos las cajas rojas y verdes para visualizar visualmente el R/R
+    slBox := box.new(left=bar_index, top=entryPrice, right=bar_index+5, bottom=slPrice, border_color=color.new(color.red, 50), bgcolor=color.new(color.red, 80))
+    tpBox := box.new(left=bar_index, top=tpPrice, right=bar_index+5, bottom=entryPrice, border_color=color.new(color.green, 50), bgcolor=color.new(color.green, 80))
+
+// EJECUCIÓN DE VENTA
+if shortC and not inLong
+    entryPrice := close
+    // Stop Loss exacto en el origen del impulso bajista
+    slPrice := entrySlPrice
+    if na(slPrice) or slPrice <= entryPrice
+        slPrice := entryPrice + (syminfo.mintick * 10)
+        
+    float slDist = slPrice - entryPrice
+        
+    // Take Profit en el fondo mínimo antes del retroceso (Liquidez)
+    tpPrice := entryTpPrice
+    if na(tpPrice) or tpPrice >= entryPrice
+        tpPrice := entryPrice - (slDist * 2) 
+    
+    float qty = riskPerTrade / slDist
+    string symbol_to_send = pcSymbol == "" ? syminfo.ticker : pcSymbol
+    string alert_msg_sell = '{"strategy": "ImbalanceNY", "ticker": "' + symbol_to_send + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(qty) + ', "entry": ' + str.tostring(close) + ', "SL": ' + str.tostring(slPrice) + ', "TP": ' + str.tostring(tpPrice) + ', "action": "sell"}'
+    string alert_msg_close_sell = '{"strategy": "ImbalanceNY", "ticker": "' + symbol_to_send + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(qty) + ', "action": "close"}'
+
+    strategy.entry("Sell", strategy.short, qty=qty, alert_message=usePc ? alert_msg_sell : "")
+    strategy.exit("Exit Sell", "Sell", stop=slPrice, limit=tpPrice, alert_message=usePc ? alert_msg_close_sell : "")
+
+    slBox := box.new(left=bar_index, top=slPrice, right=bar_index+5, bottom=entryPrice, border_color=color.new(color.red, 50), bgcolor=color.new(color.red, 80))
+    tpBox := box.new(left=bar_index, top=entryPrice, right=bar_index+5, bottom=tpPrice, border_color=color.new(color.green, 50), bgcolor=color.new(color.green, 80))
+
+// Extendemos las cajas visuales un poco más hacia la derecha en cada vela abierta
+if strategy.position_size != 0
+    box.set_right(slBox, bar_index + 1)
+    box.set_right(tpBox, bar_index + 1)
+
+// --- FIN DEL SCRIPT ---
