@@ -1,5 +1,5 @@
 //@version=6
-strategy("2EMAs", overlay=true, initial_capital=1000, margin_long=1, margin_short=1, calc_on_every_tick=true, max_boxes_count=500, max_lines_count=500, max_labels_count=500)
+strategy("2EMAs", overlay=true, initial_capital=400, margin_long=1, margin_short=1, calc_on_every_tick=true, max_boxes_count=500, max_lines_count=500, max_labels_count=500)
 
 //====================================================================
 // PARÁMETROS DE PINECONNECTOR
@@ -13,7 +13,7 @@ var float spreadTicks   = 0.0
 //====================================================================
 // VARIABLES GLOBALES (Configuración Base por Defecto)
 //====================================================================
-var float riskPercent = 0.5
+var float riskPercent = 1.0
 var float maxDailyLossPercent = 2.0
 var int velasDescanso = 1
 
@@ -38,6 +38,7 @@ simple int emaLentaPeriod = switch
     str.contains(sym_t, "NAS") or str.contains(sym_t, "US100") or str.contains(sym_t, "NQ") => 140
     str.contains(sym_t, "BTC") => 100
     => 140
+    
 var float pendienteMin = 34.0
 var int atrPeriod = 14
 
@@ -73,24 +74,24 @@ if barstate.isfirst
     // 1. ORO (Ecosistema Institucional)
     if str.contains(t, "XAU") or str.contains(t, "GOLD")
         riskPercent := 0.5
-        slAtrMult := 1.8
-        tpRRMult := 1.50
+        slAtrMult := 2.8
+        tpRRMult := 3.50
         atrDynamicTP := 0.5
         pendienteMin := 27.0
         useSessionFilter := true
         sessionTime := "0800-1600"
-        useVolumeFilter := true
-        bloqueoXtendencia := true
+        useVolumeFilter := false
+        bloqueoXtendencia := false
         adxMin := 22
-        maxCruces := 1
+        maxCruces := 2
         
         
     // 2. PLATA (Ecosistema Especulativo)
     else if str.contains(t, "XAG") or str.contains(t, "SILVER")
         riskPercent := 0.50
         slAtrMult := 2.3
-        tpRRMult := 4.0
-        atrDynamicTP := 0.88
+        tpRRMult := 6.9
+        atrDynamicTP := 0.7
         pendienteMin := 27.0
         useSessionFilter := true
         sessionTime := "0400-1600"
@@ -115,8 +116,8 @@ if barstate.isfirst
     // 4. BITCOIN (Ecosistema Especulativo)
     else if str.contains(t, "BTC")
         riskPercent := 0.50
-        slAtrMult := 1.0
-        tpRRMult := 2.0
+        slAtrMult := 1.5
+        tpRRMult := 7.0
         atrDynamicTP := 0.5
         pendienteMin := 27.0
         useSessionFilter := false
@@ -404,8 +405,6 @@ if strategy.position_size != 0
         // 2. Lógica TP Trailing (Se activa mucho antes, junto con el Break Even)
         if not dynamicTpActivated and high >= metaBe
             dynamicTpActivated := true
-            tpPrice := high + (atrVal * atrDynamicTP)
-            
             
         if dynamicTpActivated          
             tpPrice := math.max(tpPrice, high + (atrVal * atrDynamicTP))
@@ -435,9 +434,7 @@ if strategy.position_size != 0
         // 2. Lógica TP Trailing (Se activa mucho antes, junto con el Break Even)
         if not dynamicTpActivated and low <= metaBe
             dynamicTpActivated := true
-            tpPrice := low - (atrVal * atrDynamicTP)
             
-
         if dynamicTpActivated        
             tpPrice := math.min(tpPrice, low - (atrVal * atrDynamicTP)) 
             //slPrice := math.min(slPrice, low + slDistancia)

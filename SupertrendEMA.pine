@@ -23,8 +23,9 @@ isGold   = str.contains(str.upper(syminfo.ticker), "XAU") or str.contains(str.up
 isCrypto = syminfo.type == "crypto"
 
 // Factores K (Optimizados por activo)
-atrMult = isCrypto ? 2.5 : isSilver ? 2.2 : isGold ? 1.8 : 1.5
+atrMult = isCrypto ? 2.5 : isSilver ? 2.1 : isGold ? 1.8 : 1.5
 volMult = isCrypto ? 1.0 : isSilver ? 1.1 : isGold ? 1.1 : 1.1
+atrDynamicTP = isSilver ? 0.8 : 0.5
 
 // Restricción de Sesión NY
 nyTime = hour(time, "America/New_York") * 100 + minute(time, "America/New_York")
@@ -59,6 +60,7 @@ inShort = strategy.position_size < 0
 var float originalTp = na
 var float slIni = na
 var float currentRrMult = na
+var bool dynamicTpActivated = false
 
 if strategy.position_size == 0
     if longCond and not inShort
@@ -93,23 +95,41 @@ var float slPrice = na
 if strategy.position_size != 0
     float entryPrice = strategy.opentrades.entry_price(strategy.opentrades - 1)
     
-    // Al igual que en las otras estrategias, el TP respira con el ATR actual
     if strategy.position_size > 0
-        originalTp := entryPrice + (currentRrMult * atrVal)
-        tpPrice := originalTp
-        slPrice := slIni 
+        float metaBe = entryPrice + ((originalTp - entryPrice) * 0.51)
+        
+        if not dynamicTpActivated
+            tpPrice := originalTp
+            
+        if not dynamicTpActivated and high >= metaBe
+            dynamicTpActivated := true
+            
+        if dynamicTpActivated
+            tpPrice := math.max(tpPrice, high + (atrVal * atrDynamicTP))
+            
+        slPrice := superTrend //slIni 
         
         strategy.exit("Exit Buy", "Buy", stop=slPrice, limit=tpPrice)
 
     if strategy.position_size < 0
-        originalTp := entryPrice - (currentRrMult * atrVal)
-        tpPrice := originalTp
-        slPrice := slIni
+        float metaBe = entryPrice - ((entryPrice - originalTp) * 0.51)
+        
+        if not dynamicTpActivated
+            tpPrice := originalTp
+            
+        if not dynamicTpActivated and low <= metaBe
+            dynamicTpActivated := true
+            
+        if dynamicTpActivated
+            tpPrice := math.min(tpPrice, low - (atrVal * atrDynamicTP))
+            
+        slPrice := superTrend //slIni
         
         strategy.exit("Exit Sell", "Sell", stop=slPrice, limit=tpPrice)
 else
     tpPrice := na
     slPrice := na
+    dynamicTpActivated := false
 
 
 // --- GRÁFICOS ---
