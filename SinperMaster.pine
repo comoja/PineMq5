@@ -6,7 +6,7 @@ show_sar    = input.bool(true, "Mostrar SL Trail SAR (Rojo)")
 show_simple = input.bool(true, "Mostrar SL Trail Simple (Guinda)")
 
 // --- PARÁMETROS DE PINECONNECTOR ---
-use_pc         = input.bool(true, "Enviar alertas a PineConnector", group="PineConnector")
+var bool use_pc = true
 pc_license_id  = input.string("9093998805205", "PineConnector License ID", group="PineConnector")
 pc_symbol      = input.string("", "Símbolo en MT5 (Vacío = Default)", group="PineConnector")
 market_id_input= input.string("", "Market ID (Para FOREX.com)", group="PineConnector")
