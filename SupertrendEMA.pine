@@ -13,8 +13,9 @@ var float factor = 3.0
 
 // --- PARÁMETROS DE PINECONNECTOR ---
 var bool usePc = true
-var string pcLicenseId = "9093998805205"
-var string pcSymbol = "" 
+pcLicenseId = input.string("", "PineConnector License ID", group="PineConnector")
+var string pcSymbol = ""
+forex_account = input.string("", "Cuenta FOREX.com", group="Configuración de Cuenta") 
 
 // --- DETECCIÓN DE INSTRUMENTO Y MULTIPLICADORES (Adaptativo) ---
 
@@ -158,16 +159,16 @@ var float prevPos = 0.0
 if usePc and strategy.position_size != prevPos
     symbolToSend = pcSymbol == "" ? syminfo.ticker : pcSymbol
     if strategy.position_size > 0 and prevPos <= 0
-        alertMsg = pcLicenseId + ",buy," + symbolToSend + ",risk=" + str.tostring(riesgoPerc) + ",sl_price=" + str.tostring(slIni) + ",tp_price=" + str.tostring(tpPrice)
+        alertMsg = pcLicenseId + ",buy," + symbolToSend + ",risk=" + str.tostring(riesgoPerc) + ",sl_price=" + str.tostring(slIni) + ",tp_price=" + str.tostring(tpPrice) + (forex_account != "" ? ",account=" + forex_account : "")
         alert(alertMsg, alert.freq_once_per_bar)
     else if strategy.position_size < 0 and prevPos >= 0
-        alertMsg = pcLicenseId + ",sell," + symbolToSend + ",risk=" + str.tostring(riesgoPerc) + ",sl_price=" + str.tostring(slIni) + ",tp_price=" + str.tostring(tpPrice)
+        alertMsg = pcLicenseId + ",sell," + symbolToSend + ",risk=" + str.tostring(riesgoPerc) + ",sl_price=" + str.tostring(slIni) + ",tp_price=" + str.tostring(tpPrice) + (forex_account != "" ? ",account=" + forex_account : "")
         alert(alertMsg, alert.freq_once_per_bar)
     else if strategy.position_size == 0
         if prevPos > 0
-            alertMsg = pcLicenseId + ",closelong," + symbolToSend
+            alertMsg = pcLicenseId + ",closelong," + symbolToSend + (forex_account != "" ? ",account=" + forex_account : "")
             alert(alertMsg, alert.freq_once_per_bar)
         else if prevPos < 0
-            alertMsg = pcLicenseId + ",closeshort," + symbolToSend
+            alertMsg = pcLicenseId + ",closeshort," + symbolToSend + (forex_account != "" ? ",account=" + forex_account : "")
             alert(alertMsg, alert.freq_once_per_bar)
     prevPos := strategy.position_size

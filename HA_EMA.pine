@@ -1,5 +1,6 @@
 //@version=6
 strategy("HA_EMA Strategy", overlay=true, initial_capital=450, default_qty_type=strategy.percent_of_equity, default_qty_value=10, commission_type=strategy.commission.percent, commission_value=0.04)
+forex_account = input.string("", "Cuenta FOREX.com", group="Configuración de Cuenta")
 
 //+------------------------------------------------------------------+
 //|                                                     HA_EMA.pine  |

@@ -1,5 +1,6 @@
 //@version=6
 strategy("HA_EMA Multi (Gold & Silver)", overlay=true, initial_capital=450,
+forex_account = input.string("", "Cuenta FOREX.com", group="Configuración de Cuenta")
          default_qty_type=strategy.percent_of_equity, default_qty_value=10,
          commission_type=strategy.commission.percent, commission_value=0.04)
 

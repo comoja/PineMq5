@@ -11,6 +11,7 @@
 // ║  [✓] 5. Filtro magic_number = 998877 en TODAS las queries       ║
 // ╚══════════════════════════════════════════════════════════════════╝
 strategy('SniperSilver', overlay=true,
+forex_account = input.string("", "Cuenta FOREX.com", group="Configuración de Cuenta")
          initial_capital=450,
          default_qty_type=strategy.percent_of_equity,
          default_qty_value=8,

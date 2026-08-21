@@ -9,8 +9,9 @@ show_simple = input.bool(true, "Mostrar SL Trail Simple (Guinda)")
 
 // --- PARÁMETROS DE PINECONNECTOR ---
 var bool use_pc = true
-pc_license_id  = input.string("9093998805205", "PineConnector License ID", group="PineConnector")
+pc_license_id  = input.string("", "PineConnector License ID", group="PineConnector")
 pc_symbol      = input.string("", "Símbolo en MT5 (Vacío = Default)", group="PineConnector")
+forex_account  = input.string("", "Cuenta FOREX.com", group="Configuración de Cuenta")
 
 // --- DETECCIÓN DE INSTRUMENTO Y TF ---
 isSilver = str.contains(str.upper(syminfo.ticker), "XAG")    or str.contains(str.upper(syminfo.ticker), "SILVER")
@@ -115,17 +116,17 @@ var float prev_pos = 0.0
 if use_pc and strategy.position_size != prev_pos
     symbol_to_send = pc_symbol == "" ? syminfo.ticker : pc_symbol
     if strategy.position_size > 0 and prev_pos <= 0
-        alert_msg = pc_license_id + ",buy," + symbol_to_send + ",risk=" + str.tostring(riesgo_perc) + ",sl_price=" + str.tostring(sl_ini) + ",tp_price=" + str.tostring(tp_fijo)
+        alert_msg = pc_license_id + ",buy," + symbol_to_send + ",risk=" + str.tostring(riesgo_perc) + ",sl_price=" + str.tostring(sl_ini) + ",tp_price=" + str.tostring(tp_fijo) + (forex_account != "" ? ",account=" + forex_account : "")
         alert(alert_msg, alert.freq_once_per_bar)
     else if strategy.position_size < 0 and prev_pos >= 0
-        alert_msg = pc_license_id + ",sell," + symbol_to_send + ",risk=" + str.tostring(riesgo_perc) + ",sl_price=" + str.tostring(sl_ini) + ",tp_price=" + str.tostring(tp_fijo)
+        alert_msg = pc_license_id + ",sell," + symbol_to_send + ",risk=" + str.tostring(riesgo_perc) + ",sl_price=" + str.tostring(sl_ini) + ",tp_price=" + str.tostring(tp_fijo) + (forex_account != "" ? ",account=" + forex_account : "")
         alert(alert_msg, alert.freq_once_per_bar)
     else if strategy.position_size == 0
         if prev_pos > 0
-            alert_msg = pc_license_id + ",closelong," + symbol_to_send
+            alert_msg = pc_license_id + ",closelong," + symbol_to_send + (forex_account != "" ? ",account=" + forex_account : "")
             alert(alert_msg, alert.freq_once_per_bar)
         else if prev_pos < 0
-            alert_msg = pc_license_id + ",closeshort," + symbol_to_send
+            alert_msg = pc_license_id + ",closeshort," + symbol_to_send + (forex_account != "" ? ",account=" + forex_account : "")
             alert(alert_msg, alert.freq_once_per_bar)
     prev_pos := strategy.position_size
 

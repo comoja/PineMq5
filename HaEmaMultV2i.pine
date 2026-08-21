@@ -1,5 +1,6 @@
 //@version=6
 strategy("HaEmaMultiV2", overlay=true, initial_capital=600,
+forex_account = input.string("", "Cuenta FOREX.com", group="Configuración de Cuenta")
          default_qty_type=strategy.percent_of_equity, default_qty_value=10,
          commission_type=strategy.commission.percent, commission_value=0.04,
          calc_on_every_tick=true, process_orders_on_close=true, margin_long=0.001, margin_short=0.001, max_boxes_count=500, max_lines_count=500)

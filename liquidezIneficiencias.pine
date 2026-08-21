@@ -7,6 +7,8 @@ strategy("liquidezIneficiencias", overlay=true, margin_long=100, margin_short=10
 var bool usePc = true
 var string pcSymbol = ""
 marketIdInput = input.string("", "Market ID Opcional (Para FOREX.com)", group="PineConnector")
+webhook_token = input.string("", "Token ", group="Seguridad Webhook")
+forex_account = input.string("", "Cuenta ", group="Configuración de Cuenta")
 // =================================================================================================
 // PARÁMETROS FIJOS (Sin Inputs)
 // =================================================================================================
@@ -241,7 +243,7 @@ plotshape(drawSellArrow, title="FVG 5m Bajista (A favor EMA)", style=shape.arrow
 
 // Dibujamos la línea negra de la EMA 4H SOLO cuando el estado es Activo (Alcista o Bajista). Si es Nulo, la ocultamos.
 color emaColor = marketTrend == 0 ? na : color.black
-plot(ema4H, color=emaColor, title="Tendencia Guía 4H", linewidth=3, style=plot.style_linebr)
+//plot(ema4H, color=emaColor, title="Tendencia Guía 4H", linewidth=3, style=plot.style_linebr)
 
 // =================================================================================================
 // 3. LÓGICA DE ENTRADA Y GESTIÓN
@@ -292,6 +294,26 @@ var float tpPrice = na
 var float entryPrice = na
 var box slBox = na
 var box tpBox = na
+var int lastTradesCount = 0
+
+// Monitorear cuando una operación se cierra para recortar la caja y poner el marcador de salida
+if strategy.closedtrades > lastTradesCount
+    int lastIdx = strategy.closedtrades - 1
+    float exitProf = strategy.closedtrades.profit(lastIdx)
+    float exitP = strategy.closedtrades.exit_price(lastIdx)
+    
+    if not na(slBox)
+        box.set_right(slBox, bar_index)
+    if not na(tpBox)
+        box.set_right(tpBox, bar_index)
+        
+    // Marcador visual en la vela donde se tocó TP o SL
+    if exitProf > 0
+        label.new(bar_index, high, "🎯 TP ALCANZADO\n" + str.tostring(exitP, format.mintick), color=color.green, textcolor=color.white, style=label.style_label_down, size=size.small)
+    else
+        label.new(bar_index, low, "🛑 SL ALCANZADO\n" + str.tostring(exitP, format.mintick), color=color.red, textcolor=color.white, style=label.style_label_up, size=size.small)
+        
+    lastTradesCount := strategy.closedtrades
 
 // EJECUCIÓN DE COMPRA
 if longC and not inShort
@@ -309,18 +331,18 @@ if longC and not inShort
     if na(tpPrice) or tpPrice <= entryPrice
         tpPrice := entryPrice + (slDist * 2) 
     
-    // Calculamos el tamaño de la posición basándonos en los $100 fijos de riesgo
+    // Calculamos el tamaño de la posición basándonos en los $10 fijos de riesgo
     float qty = riskPerTrade / slDist
     string symbol_to_send = pcSymbol == "" ? syminfo.ticker : pcSymbol
-    string alert_msg_buy = '{"strategy": "ImbalanceNY", "ticker": "' + symbol_to_send + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(qty) + ', "entry": ' + str.tostring(close) + ', "SL": ' + str.tostring(slPrice) + ', "TP": ' + str.tostring(tpPrice) + ', "action": "buy"}'
-    string alert_msg_close_buy = '{"strategy": "ImbalanceNY", "ticker": "' + symbol_to_send + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(qty) + ', "action": "close"}'
+    string alert_msg_buy = '{"strategy": "ImbalanceNY", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "\' + forex_account + \'", "ticker": "' + symbol_to_send + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(qty) + ', "entry": ' + str.tostring(close) + ', "SL": ' + str.tostring(slPrice) + ', "TP": ' + str.tostring(tpPrice) + ', "action": "buy"}'
+    string alert_msg_close_buy = '{"strategy": "ImbalanceNY", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "\' + forex_account + \'", "ticker": "' + symbol_to_send + '", "action": "close"}'
     
     strategy.entry("Buy", strategy.long, qty=qty, alert_message=usePc ? alert_msg_buy : "")
     strategy.exit("Exit Buy", "Buy", stop=slPrice, limit=tpPrice, alert_message=usePc ? alert_msg_close_buy : "")
     
-    // Dibujamos las cajas rojas y verdes para visualizar visualmente el R/R
-    slBox := box.new(left=bar_index, top=entryPrice, right=bar_index+5, bottom=slPrice, border_color=color.new(color.red, 50), bgcolor=color.new(color.red, 80))
-    tpBox := box.new(left=bar_index, top=tpPrice, right=bar_index+5, bottom=entryPrice, border_color=color.new(color.green, 50), bgcolor=color.new(color.green, 80))
+    // Dibujamos las cajas rojas y verdes con etiquetas claras de SL y TP
+    slBox := box.new(left=bar_index, top=entryPrice, right=bar_index+1, bottom=slPrice, border_color=color.new(color.red, 30), bgcolor=color.new(color.red, 80), text="SL: " + str.tostring(slPrice, format.mintick), text_color=color.red, text_size=size.small, text_halign=text.align_right, text_valign=text.align_bottom)
+    tpBox := box.new(left=bar_index, top=tpPrice, right=bar_index+1, bottom=entryPrice, border_color=color.new(color.green, 30), bgcolor=color.new(color.green, 80), text="TP: " + str.tostring(tpPrice, format.mintick), text_color=color.green, text_size=size.small, text_halign=text.align_right, text_valign=text.align_top)
 
 // EJECUCIÓN DE VENTA
 if shortC and not inLong
@@ -339,18 +361,28 @@ if shortC and not inLong
     
     float qty = riskPerTrade / slDist
     string symbol_to_send = pcSymbol == "" ? syminfo.ticker : pcSymbol
-    string alert_msg_sell = '{"strategy": "ImbalanceNY", "ticker": "' + symbol_to_send + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(qty) + ', "entry": ' + str.tostring(close) + ', "SL": ' + str.tostring(slPrice) + ', "TP": ' + str.tostring(tpPrice) + ', "action": "sell"}'
-    string alert_msg_close_sell = '{"strategy": "ImbalanceNY", "ticker": "' + symbol_to_send + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(qty) + ', "action": "close"}'
+    string alert_msg_sell = '{"strategy": "ImbalanceNY", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "\' + forex_account + \'", "ticker": "' + symbol_to_send + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(qty) + ', "entry": ' + str.tostring(close) + ', "SL": ' + str.tostring(slPrice) + ', "TP": ' + str.tostring(tpPrice) + ', "action": "sell"}'
+    string alert_msg_close_sell = '{"strategy": "ImbalanceNY", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "\' + forex_account + \'", "ticker": "' + symbol_to_send + '", "action": "close"}'
 
     strategy.entry("Sell", strategy.short, qty=qty, alert_message=usePc ? alert_msg_sell : "")
     strategy.exit("Exit Sell", "Sell", stop=slPrice, limit=tpPrice, alert_message=usePc ? alert_msg_close_sell : "")
 
-    slBox := box.new(left=bar_index, top=slPrice, right=bar_index+5, bottom=entryPrice, border_color=color.new(color.red, 50), bgcolor=color.new(color.red, 80))
-    tpBox := box.new(left=bar_index, top=entryPrice, right=bar_index+5, bottom=tpPrice, border_color=color.new(color.green, 50), bgcolor=color.new(color.green, 80))
+    slBox := box.new(left=bar_index, top=slPrice, right=bar_index+1, bottom=entryPrice, border_color=color.new(color.red, 30), bgcolor=color.new(color.red, 80), text="SL: " + str.tostring(slPrice, format.mintick), text_color=color.red, text_size=size.small, text_halign=text.align_right, text_valign=text.align_top)
+    tpBox := box.new(left=bar_index, top=entryPrice, right=bar_index+1, bottom=tpPrice, border_color=color.new(color.green, 30), bgcolor=color.new(color.green, 80), text="TP: " + str.tostring(tpPrice, format.mintick), text_color=color.green, text_size=size.small, text_halign=text.align_right, text_valign=text.align_bottom)
 
-// Extendemos las cajas visuales un poco más hacia la derecha en cada vela abierta
+// Extendemos las cajas visuales en cada vela mientras la operación siga abierta
 if strategy.position_size != 0
-    box.set_right(slBox, bar_index + 1)
-    box.set_right(tpBox, bar_index + 1)
+    box.set_right(slBox, bar_index)
+    box.set_right(tpBox, bar_index)
+
+// Sombreado de avance temporal durante la operación activa
+color progressBg = strategy.position_size > 0 ? color.new(color.green, 92) : strategy.position_size < 0 ? color.new(color.red, 92) : na
+bgcolor(progressBg, title="Avance Temporal de Operación")
+
+// Líneas visuales dinámicas durante la operación en curso
+inTrade = strategy.position_size != 0
+plot(inTrade ? slPrice : na, "Nivel SL", color=color.red, linewidth=2, style=plot.style_linebr)
+plot(inTrade ? tpPrice : na, "Nivel TP", color=color.green, linewidth=2, style=plot.style_linebr)
+plot(inTrade ? entryPrice : na, "Nivel Entrada", color=color.blue, linewidth=1, style=plot.style_linebr)
 
 // --- FIN DEL SCRIPT ---

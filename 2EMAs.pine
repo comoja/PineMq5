@@ -5,9 +5,11 @@ strategy("2EMAs", overlay=true, initial_capital=400, margin_long=1, margin_short
 // PARÁMETROS DE PINECONNECTOR
 //====================================================================
 var bool usePc         = true
-var string pcLicenseId  = "9093998805205"
+pcLicenseId = input.string("9093998805205", "PineConnector License ID", group="PineConnector")
 var string pcSymbol      = ""
 marketIdInput = input.string("", "Market ID Opcional (Para FOREX.com)", group="PineConnector")
+webhook_token = input.string("", "Token Webhook", group="Seguridad Webhook")
+forex_account = input.string("", "Cuenta", group="Configuración de Cuenta")
 var float spreadTicks   = 0.0
 
 //====================================================================
@@ -33,7 +35,7 @@ simple int emaRapidaPeriod = switch
     => 9
 
 simple int emaLentaPeriod = switch
-    str.contains(sym_t, "XAU") or str.contains(sym_t, "GOLD") => 140
+    str.contains(sym_t, "XAU") or str.contains(sym_t, "GOLD") => 95
     str.contains(sym_t, "XAG") or str.contains(sym_t, "SILVER") => 78
     str.contains(sym_t, "NAS") or str.contains(sym_t, "US100") or str.contains(sym_t, "NQ") => 140
     str.contains(sym_t, "BTC") => 100
@@ -74,9 +76,9 @@ if barstate.isfirst
     // 1. ORO (Ecosistema Institucional)
     if str.contains(t, "XAU") or str.contains(t, "GOLD")
         riskPercent := 0.5
-        slAtrMult := 2.8
-        tpRRMult := 3.50
-        atrDynamicTP := 0.5
+        slAtrMult := 2.3
+        tpRRMult := 6.5
+        atrDynamicTP := 0.30
         pendienteMin := 27.0
         useSessionFilter := true
         sessionTime := "0800-1600"
@@ -236,12 +238,12 @@ salidaVenta = (emaR > emaL and emaR[1] <= emaL[1]) or (close > emaL)
 
 if strategy.position_size > 0 and salidaCompra
     string symbol_to_send_close = pcSymbol == "" ? syminfo.ticker : pcSymbol
-    string alert_msg_close = '{"strategy": "2EMAs", "ticker": "' + symbol_to_send_close + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(math.abs(strategy.position_size)) + ', "action": "close"}'
+    string alert_msg_close = '{"strategy": "2EMAs", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "\' + forex_account + \'", "ticker": "' + symbol_to_send_close + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(math.abs(strategy.position_size)) + ', "action": "close"}'
     strategy.close("Buy", comment="Cierre Forzado", alert_message=usePc ? alert_msg_close : "")
     lastPositionExitPrice := close
 if strategy.position_size < 0 and salidaVenta
     string symbol_to_send_close = pcSymbol == "" ? syminfo.ticker : pcSymbol
-    string alert_msg_close = '{"strategy": "2EMAs", "ticker": "' + symbol_to_send_close + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(math.abs(strategy.position_size)) + ', "action": "close"}'
+    string alert_msg_close = '{"strategy": "2EMAs", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "\' + forex_account + \'", "ticker": "' + symbol_to_send_close + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(math.abs(strategy.position_size)) + ', "action": "close"}'
     strategy.close("Sell", comment="Cierre Forzado", alert_message=usePc ? alert_msg_close : "")
     lastPositionExitPrice := close
 
@@ -312,8 +314,8 @@ if strategy.position_size == 0 and currentTrend != 0 and not isLateral and filtr
                 
                 entryAtr := atrVal
                 string symbol_to_send = pcSymbol == "" ? syminfo.ticker : pcSymbol
-                string my_alert_msg_buy = '{"strategy": "2EMAs", "ticker": "' + symbol_to_send + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(qtyCorrect, "#.##") + ', "entry": ' + str.tostring(close, format.mintick) + ', "SL": ' + str.tostring(slPrice, format.mintick) + ', "TP": ' + str.tostring(tpPrice, format.mintick) + ', "action": "buy"}'
-                cached_alert_msg_close_buy := '{"strategy": "2EMAs", "ticker": "' + symbol_to_send + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(qtyCorrect, "#.##") + ', "action": "close"}'
+                string my_alert_msg_buy = '{"strategy": "2EMAs", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "\' + forex_account + \'", "ticker": "' + symbol_to_send + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(qtyCorrect, "#.##") + ', "entry": ' + str.tostring(close, format.mintick) + ', "SL": ' + str.tostring(slPrice, format.mintick) + ', "TP": ' + str.tostring(tpPrice, format.mintick) + ', "action": "buy"}'
+                cached_alert_msg_close_buy := '{"strategy": "2EMAs", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "\' + forex_account + \'", "ticker": "' + symbol_to_send + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(qtyCorrect, "#.##") + ', "action": "close"}'
                 strategy.entry("Buy", strategy.long, qty=qtyCorrect, alert_message=usePc ? my_alert_msg_buy : "")
                 lastEntryBar := bar_index
                 beActivated := false
@@ -365,8 +367,8 @@ if strategy.position_size == 0 and currentTrend != 0 and not isLateral and filtr
                 
                 entryAtr := atrVal
                 string symbol_to_send = pcSymbol == "" ? syminfo.ticker : pcSymbol
-                string my_alert_msg_sell = '{"strategy": "2EMAs", "ticker": "' + symbol_to_send + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(qtyCorrect, "#.##") + ', "entry": ' + str.tostring(close, format.mintick) + ', "SL": ' + str.tostring(slPrice, format.mintick) + ', "TP": ' + str.tostring(tpPrice, format.mintick) + ', "action": "sell"}'
-                cached_alert_msg_close_sell := '{"strategy": "2EMAs", "ticker": "' + symbol_to_send + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(qtyCorrect, "#.##") + ', "action": "close"}'
+                string my_alert_msg_sell = '{"strategy": "2EMAs", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "\' + forex_account + \'", "ticker": "' + symbol_to_send + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(qtyCorrect, "#.##") + ', "entry": ' + str.tostring(close, format.mintick) + ', "SL": ' + str.tostring(slPrice, format.mintick) + ', "TP": ' + str.tostring(tpPrice, format.mintick) + ', "action": "sell"}'
+                cached_alert_msg_close_sell := '{"strategy": "2EMAs", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "\' + forex_account + \'", "ticker": "' + symbol_to_send + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(qtyCorrect, "#.##") + ', "action": "close"}'
                 strategy.entry("Sell", strategy.short, qty=qtyCorrect, alert_message=usePc ? my_alert_msg_sell : "")
                 lastEntryBar := bar_index
                 beActivated := false
@@ -390,7 +392,7 @@ if strategy.position_size != 0
         // El TP se queda fijo como se calculó al entrar
         // Le damos 0.5 ATR de "colchón" bajo la EMA para que las mechas no te saquen
         //slPrice := beActivated?math.max(emaL , slPrice):math.min(math.max(emaL , slPrice),emaR)
-        slPrice := math.max(emaL,slPrice)
+        slPrice := math.max(emaL, slPrice)
         if not dynamicTpActivated
             tpPrice := originalTp
         //slPrice := emaL
@@ -420,7 +422,7 @@ if strategy.position_size != 0
         // Le damos 0.5 ATR de "colchón" sobre la EMA para que las mechas no te saquen
         //slPrice := beActivated?math.min(slPrice, emaL ):math.max(math.min(slPrice, emaL ),emaR )  
         // El TP se queda fijo como se calculó al entrar
-        slPrice := math.min(emaL,slPrice)
+        slPrice := math.min(emaL, slPrice)
         if not dynamicTpActivated
             tpPrice := originalTp
 

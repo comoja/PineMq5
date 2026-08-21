@@ -11,6 +11,7 @@
 // ║  [✓] 5. Filtro magicNumber en TODAS las consultas               ║
 // ╚══════════════════════════════════════════════════════════════════╝
 strategy('BreakoutNY 5min', overlay=true, initial_capital=450, default_qty_type=strategy.percent_of_equity, default_qty_value=2, process_orders_on_close=true)
+forex_account = input.string("", "Cuenta FOREX.com", group="Configuración de Cuenta")
 
 // ─────────────────────────────────────────────
 // INPUTS - GESTIÓN DE RIESGO
