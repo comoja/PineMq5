@@ -3,7 +3,7 @@ strategy('Sniper Master', overlay = true, initial_capital = 1500, margin_long = 
 
 // --- PARÁMETROS DE CONFIGURACIÓN Y SEGURIDAD ---
 webhook_token = input.string("", "Token Secreto Webhook", group="Seguridad Webhook")
-forex_account = input.string("", "Cuenta FOREX.com", group="Configuración de Cuenta")
+forex_account = input.string("", "Cuenta", group="Configuración de Cuenta")
 
 // --- VARIABLES INTERNAS (SIN INPUTS) ---
 var bool show_sar        = true
@@ -22,6 +22,14 @@ var bool useSessionFilter = false
 var string sessionTime = "0930-1600"
 var bool useVolumeFilter = false
 var float vol_mult = 1.0
+simple string sym_t = syminfo.ticker
+
+simple int emaPeriod = switch
+    str.contains(sym_t, "XAU") or str.contains(sym_t, "GOLD") => 235
+    str.contains(sym_t, "XAG") or str.contains(sym_t, "SILVER") => 250
+    str.contains(sym_t, "NAS") or str.contains(sym_t, "US100") or str.contains(sym_t, "NQ") => 140
+    str.contains(sym_t, "BTC") => 170
+    => 140
 
 var string targetTF = "15"
 var bool isGold = false
@@ -34,25 +42,26 @@ if barstate.isfirst
     // 1. ORO (Ecosistema Institucional)
     if str.contains(t, "XAU") or str.contains(t, "GOLD")
         isGold := true
-        targetTF := "30"
+        targetTF := "15"
         riesgo_perc := 0.5
-        atr_mult := 1.8
-        minRR := 2.8
+        atr_mult := 1.2
+        minRR := 2.1
         useSessionFilter := true
         sessionTime := "0800-1600"
         useVolumeFilter := true
         vol_mult := 1.1
+       
         
     // 2. PLATA (Ecosistema Especulativo)
     else if str.contains(t, "XAG") or str.contains(t, "SILVER")
         isSilver := true
         targetTF := "15"
         riesgo_perc := 0.25
-        atr_mult := 2.2
-        minRR := 3.5
+        atr_mult := 1.8
+        minRR := 3.0
         useSessionFilter := true
         sessionTime := "0800-1600"
-        useVolumeFilter := true
+        useVolumeFilter := false
         vol_mult := 1.1
         
     // 3. NASDAQ (Ecosistema Institucional)
@@ -72,15 +81,16 @@ if barstate.isfirst
         targetTF := "60"
         riesgo_perc := 0.25
         atr_mult := 2.5
-        minRR := 3.0
+        minRR := 2.3
         useSessionFilter := false
         useVolumeFilter := false
         vol_mult := 1.0
 
+
 bool tf_ok = timeframe.period == targetTF  // informativo — ya NO bloquea entradas
 
 // --- INDICADORES ---
-emaVal = ta.ema(close, 140)
+emaVal = ta.ema(close, emaPeriod)
 [macdL, macdS, _] = ta.macd(close, 8, 21, 5)
 
 atr    = ta.atr(14)
@@ -212,10 +222,10 @@ if strategy.position_size != 0
         float ratio = dist_sl_ini / dist_tp_ini
         
         // El precio se mueve hacia arriba (ganancia)
-        if high > entry_price
-            float delta_p = high - entry_price
-            float possible_sl = sl_ini + (delta_p * ratio)
-            slDinamico := math.max(slDinamico, possible_sl)
+       // if high > entry_price
+         //   float delta_p = high - entry_price
+          //  float possible_sl = sl_ini + (delta_p * ratio)
+        slDinamico := math.max(slDinamico, emaVal)
                 
     // VENTA
     else if strategy.position_size < 0
@@ -224,10 +234,10 @@ if strategy.position_size != 0
         float ratio = dist_sl_ini / dist_tp_ini
         
         // El precio se mueve hacia abajo (ganancia)
-        if low < entry_price
-            float delta_p = entry_price - low
-            float possible_sl = sl_ini - (delta_p * ratio)
-            slDinamico := math.min(slDinamico, possible_sl)
+        //if low < entry_price
+         //   float delta_p = entry_price - low
+         //   float possible_sl = sl_ini - (delta_p * ratio)
+        slDinamico := math.min(slDinamico, emaVal)
 
     string symbol_to_send = pc_symbol == "" ? syminfo.ticker : pc_symbol
     string alert_msg_close = '{"strategy": "SniperMaster", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "' + forex_account + '", "ticker": "' + symbol_to_send + '", "market_id": "' + market_id_input + '", "quantity": ' + str.tostring(math.abs(strategy.position_size)) + ', "action": "close"}'

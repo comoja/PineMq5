@@ -36,7 +36,7 @@ simple int emaRapidaPeriod = switch
 
 simple int emaLentaPeriod = switch
     str.contains(sym_t, "XAU") or str.contains(sym_t, "GOLD") => 95
-    str.contains(sym_t, "XAG") or str.contains(sym_t, "SILVER") => 78
+    str.contains(sym_t, "XAG") or str.contains(sym_t, "SILVER") => 90
     str.contains(sym_t, "NAS") or str.contains(sym_t, "US100") or str.contains(sym_t, "NQ") => 140
     str.contains(sym_t, "BTC") => 100
     => 140
@@ -93,7 +93,7 @@ if barstate.isfirst
         riskPercent := 0.50
         slAtrMult := 2.3
         tpRRMult := 6.9
-        atrDynamicTP := 0.7
+        atrDynamicTP := 1.8
         pendienteMin := 27.0
         useSessionFilter := true
         sessionTime := "0400-1600"

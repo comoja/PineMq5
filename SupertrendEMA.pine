@@ -8,8 +8,8 @@ var float minRR = 1.5
 // Parámetros de Indicadores
 var int emaFastPeriod = 9
 var int emaSlowPeriod = 21
-var int atrPeriod = 10
-var float factor = 3.0
+var int atrPeriod = 18
+var float factor = 3.4
 
 // --- PARÁMETROS DE PINECONNECTOR ---
 var bool usePc = true
@@ -24,19 +24,21 @@ isGold   = str.contains(str.upper(syminfo.ticker), "XAU") or str.contains(str.up
 isCrypto = syminfo.type == "crypto"
 
 // Factores K (Optimizados por activo)
-atrMult = isCrypto ? 2.5 : isSilver ? 2.1 : isGold ? 1.8 : 1.5
-volMult = isCrypto ? 1.0 : isSilver ? 1.1 : isGold ? 1.1 : 1.1
-atrDynamicTP = isSilver ? 0.8 : 0.5
+atrPeriod := isCrypto ? 18 : isSilver ? 17 : isGold ? 18 : 18
+factor := isCrypto ? 3.4 : isSilver ? 2.3 : isGold ? 3.4 :3.4
+atrMult = isCrypto ? 2.5 : isSilver ? 0.9 : isGold ? 0.8 : 1.5
+volMult = isCrypto ? 1.0 : isSilver ? 1.0 : isGold ? 1.1 : 1.1
+atrDynamicTP = isSilver ? 1.72 : 0.3
 
 // Restricción de Sesión NY
 nyTime = hour(time, "America/New_York") * 100 + minute(time, "America/New_York")
-enSesion = isCrypto or (nyTime >= 930 and nyTime <= 1600)
+enSesion = isCrypto or (nyTime >= 530 and nyTime <= 1600)
 
 // --- INDICADORES BÁSICOS ---
 emaFast  = ta.ema(close, emaFastPeriod)
 emaSlow = ta.ema(close, emaSlowPeriod)
 atrVal = ta.atr(14)
-volSma = ta.sma(volume, 20)
+volSma = ta.sma(volume, 50)
 tieneVol = not na(volume) and volume > 0
 volAlto = tieneVol ? (ta.highest(volume, 3) > (volSma * volMult)) : true
 
@@ -135,8 +137,8 @@ else
 
 // --- GRÁFICOS ---
 // EMAs
-plot(emaFast, "EMA 9", color=color.green, linewidth=2)
-plot(emaSlow, "EMA 21", color=color.red, linewidth=2)
+plot(emaFast, "EMA 9", color=color.yellow, linewidth=2)
+plot(emaSlow, "EMA 21", color=color.blue, linewidth=2)
 
 // Supertrend
 upTrend = plot(isSupertrendBullish ? superTrend : na, "Up Trend", color=color.green, style=plot.style_linebr, linewidth=2)
