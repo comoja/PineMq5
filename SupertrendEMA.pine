@@ -11,10 +11,12 @@ var int emaSlowPeriod = 21
 var int atrPeriod = 18
 var float factor = 3.4
 
-// --- PARÁMETROS DE PINECONNECTOR ---
+// --- PARÁMETROS DE PINECONNECTOR Y WEBHOOK ---
 var bool usePc = true
 pcLicenseId = input.string("", "PineConnector License ID", group="PineConnector")
 var string pcSymbol = ""
+market_id_input = input.string("", "Market ID Opcional", group="PineConnector")
+webhook_token = input.string("", "Token Secreto Webhook", group="Seguridad Webhook")
 forex_account = input.string("", "Cuenta FOREX.com", group="Configuración de Cuenta") 
 
 // --- DETECCIÓN DE INSTRUMENTO Y MULTIPLICADORES (Adaptativo) ---
@@ -24,11 +26,12 @@ isGold   = str.contains(str.upper(syminfo.ticker), "XAU") or str.contains(str.up
 isCrypto = syminfo.type == "crypto"
 
 // Factores K (Optimizados por activo)
-atrPeriod := isCrypto ? 18 : isSilver ? 17 : isGold ? 18 : 18
-factor := isCrypto ? 3.4 : isSilver ? 2.3 : isGold ? 3.4 :3.4
-atrMult = isCrypto ? 2.5 : isSilver ? 0.9 : isGold ? 0.8 : 1.5
+minRR := isCrypto ? 1.5 : isSilver ? 1.5 : isGold ? 6.3 :1.5
+atrPeriod := isCrypto ? 18 : isSilver ? 17 : isGold ? 17 : 18
+factor := isCrypto ? 3.4 : isSilver ? 2.3 : isGold ? 3.9 :3.4
+atrMult = isCrypto ? 2.5 : isSilver ? 0.7 : isGold ? 0.8 : 1.5
 volMult = isCrypto ? 1.0 : isSilver ? 1.0 : isGold ? 1.1 : 1.1
-atrDynamicTP = isSilver ? 1.72 : 0.3
+atrDynamicTP = isSilver ? 1.72 : 2.0
 
 // Restricción de Sesión NY
 nyTime = hour(time, "America/New_York") * 100 + minute(time, "America/New_York")
@@ -76,7 +79,9 @@ if strategy.position_size == 0
         distanciaSl = math.abs(close - slIni)
         riesgoMonetario = strategy.equity * (riesgoPerc / 100)
         qtyCorrect = distanciaSl > 0 ? riesgoMonetario / distanciaSl : 0
-        strategy.entry("Buy", strategy.long, qty = qtyCorrect)
+        string symbol_to_send = pcSymbol == "" ? syminfo.ticker : pcSymbol
+        string alert_msg_buy = '{"strategy": "SupertrendEMA", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "' + forex_account + '", "ticker": "' + symbol_to_send + '", "market_id": "' + market_id_input + '", "quantity": ' + str.tostring(qtyCorrect) + ', "entry": ' + str.tostring(close) + ', "SL": ' + str.tostring(slIni) + ', "TP": ' + str.tostring(tpFijo) + ', "action": "buy"}'
+        strategy.entry("Buy", strategy.long, qty = qtyCorrect, alert_message = usePc ? alert_msg_buy : "")
         
     if shortCond and not inLong
         slIni := close + (atrVal * atrMult)
@@ -88,7 +93,9 @@ if strategy.position_size == 0
         distanciaSl = math.abs(slIni - close)
         riesgoMonetario = strategy.equity * (riesgoPerc / 100)
         qtyCorrect = distanciaSl > 0 ? riesgoMonetario / distanciaSl : 0
-        strategy.entry("Sell", strategy.short, qty = qtyCorrect)
+        string symbol_to_send = pcSymbol == "" ? syminfo.ticker : pcSymbol
+        string alert_msg_sell = '{"strategy": "SupertrendEMA", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "' + forex_account + '", "ticker": "' + symbol_to_send + '", "market_id": "' + market_id_input + '", "quantity": ' + str.tostring(qtyCorrect) + ', "entry": ' + str.tostring(close) + ', "SL": ' + str.tostring(slIni) + ', "TP": ' + str.tostring(tpFijo) + ', "action": "sell"}'
+        strategy.entry("Sell", strategy.short, qty = qtyCorrect, alert_message = usePc ? alert_msg_sell : "")
 
 
 // --- GESTIÓN DINÁMICA (Visual y Salidas) ---
@@ -97,6 +104,7 @@ var float slPrice = na
 
 if strategy.position_size != 0
     float entryPrice = strategy.opentrades.entry_price(strategy.opentrades - 1)
+    string symbol_to_send = pcSymbol == "" ? syminfo.ticker : pcSymbol
     
     if strategy.position_size > 0
         float metaBe = entryPrice + ((originalTp - entryPrice) * 0.51)
@@ -112,7 +120,8 @@ if strategy.position_size != 0
             
         slPrice := superTrend //slIni 
         
-        strategy.exit("Exit Buy", "Buy", stop=slPrice, limit=tpPrice)
+        string alert_msg_close_buy = '{"strategy": "SupertrendEMA", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "' + forex_account + '", "ticker": "' + symbol_to_send + '", "market_id": "' + market_id_input + '", "quantity": ' + str.tostring(math.abs(strategy.position_size)) + ', "action": "close"}'
+        strategy.exit("Exit Buy", "Buy", stop=slPrice, limit=tpPrice, alert_message = usePc ? alert_msg_close_buy : "")
 
     if strategy.position_size < 0
         float metaBe = entryPrice - ((entryPrice - originalTp) * 0.51)
@@ -128,7 +137,8 @@ if strategy.position_size != 0
             
         slPrice := superTrend //slIni
         
-        strategy.exit("Exit Sell", "Sell", stop=slPrice, limit=tpPrice)
+        string alert_msg_close_sell = '{"strategy": "SupertrendEMA", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "' + forex_account + '", "ticker": "' + symbol_to_send + '", "market_id": "' + market_id_input + '", "quantity": ' + str.tostring(math.abs(strategy.position_size)) + ', "action": "close"}'
+        strategy.exit("Exit Sell", "Sell", stop=slPrice, limit=tpPrice, alert_message = usePc ? alert_msg_close_sell : "")
 else
     tpPrice := na
     slPrice := na
@@ -155,22 +165,3 @@ pEntry = plot(currentEntryPrice, "Precio de Entrada", color=na, style=plot.style
 fill(pEntry, pSl, color=color.new(color.red, 85), title="Fondo SL")
 fill(pEntry, pTp, color=color.new(color.green, 85), title="Fondo TP")
 
-
-// --- PINECONNECTOR ---
-var float prevPos = 0.0
-if usePc and strategy.position_size != prevPos
-    symbolToSend = pcSymbol == "" ? syminfo.ticker : pcSymbol
-    if strategy.position_size > 0 and prevPos <= 0
-        alertMsg = pcLicenseId + ",buy," + symbolToSend + ",risk=" + str.tostring(riesgoPerc) + ",sl_price=" + str.tostring(slIni) + ",tp_price=" + str.tostring(tpPrice) + (forex_account != "" ? ",account=" + forex_account : "")
-        alert(alertMsg, alert.freq_once_per_bar)
-    else if strategy.position_size < 0 and prevPos >= 0
-        alertMsg = pcLicenseId + ",sell," + symbolToSend + ",risk=" + str.tostring(riesgoPerc) + ",sl_price=" + str.tostring(slIni) + ",tp_price=" + str.tostring(tpPrice) + (forex_account != "" ? ",account=" + forex_account : "")
-        alert(alertMsg, alert.freq_once_per_bar)
-    else if strategy.position_size == 0
-        if prevPos > 0
-            alertMsg = pcLicenseId + ",closelong," + symbolToSend + (forex_account != "" ? ",account=" + forex_account : "")
-            alert(alertMsg, alert.freq_once_per_bar)
-        else if prevPos < 0
-            alertMsg = pcLicenseId + ",closeshort," + symbolToSend + (forex_account != "" ? ",account=" + forex_account : "")
-            alert(alertMsg, alert.freq_once_per_bar)
-    prevPos := strategy.position_size
