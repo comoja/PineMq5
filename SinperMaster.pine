@@ -3,7 +3,7 @@ strategy('Sniper Master', overlay = true, initial_capital = 1500, margin_long = 
 
 // --- PARÁMETROS DE CONFIGURACIÓN Y SEGURIDAD ---
 webhook_token = input.string("", "Token Secreto Webhook", group="Seguridad Webhook")
-forex_account = input.string("", "Cuenta", group="Configuración de Cuenta")
+forex_account = input.string ("ggAAAAABqjwPlVclysTTnuKpbpe2knYotiFexsL22ZnxIOpcwHIEfAgOqSSRn1241XZsAChVNOd7maFcmDFjo4mo-7BN0Th72ykDyEzSd3X-KHfD9q_LpUxtxtgjhR3OFvIfIuqON7xgq", "Cuenta", group="Configuración de Cuenta") 
 
 // --- VARIABLES INTERNAS (SIN INPUTS) ---
 var bool show_sar        = true
@@ -57,7 +57,7 @@ if barstate.isfirst
         isSilver := true
         targetTF := "15"
         riesgo_perc := 0.25
-        atr_mult := 1.8
+        atr_mult := 0.9
         minRR := 3.0
         useSessionFilter := true
         sessionTime := "0800-1600"
@@ -174,7 +174,7 @@ if strategy.position_size == 0
         // Usar syminfo.pointvalue garantiza que funcione en Forex (USD/JPY) y Metales
         qty_correct = distancia_sl > 0 ? riesgo_monetario / (distancia_sl * syminfo.pointvalue) : 0
         string symbol_to_send = pc_symbol == "" ? syminfo.ticker : pc_symbol
-        string alert_msg_buy = '{"strategy": "SniperMaster", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "' + forex_account + '", "ticker": "' + symbol_to_send + '", "market_id": "' + market_id_input + '", "quantity": ' + str.tostring(qty_correct) + ', "entry": ' + str.tostring(close) + ', "SL": ' + str.tostring(sl_ini) + ', "TP": ' + str.tostring(tp_fijo) + ', "action": "buy"}'
+        string alert_msg_buy = '{"strategy": "SniperMaster", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "' + forex_account + '", "ticker": "' + symbol_to_send + '", "market_id": "' + market_id_input + '", "quantity": ' + str.tostring(qty_correct, "#.##") + ', "entry": ' + str.tostring(close, "#.##") + ', "SL": ' + str.tostring(sl_ini, "#.##") + ', "TP": ' + str.tostring(tp_fijo, "#.##") + ', "action": "buy"}'
         strategy.entry("Long", strategy.long, qty = qty_correct, alert_message=use_pc ? alert_msg_buy : "")
     if shortC
         sl_ini := high + (atr * atr_mult)
@@ -198,7 +198,7 @@ if strategy.position_size == 0
         // Usar syminfo.pointvalue garantiza que funcione en Forex (USD/JPY) y Metales
         qty_correct = distancia_sl > 0 ? riesgo_monetario / (distancia_sl * syminfo.pointvalue) : 0
         string symbol_to_send = pc_symbol == "" ? syminfo.ticker : pc_symbol
-        string alert_msg_sell = '{"strategy": "SniperMaster", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "' + forex_account + '", "ticker": "' + symbol_to_send + '", "market_id": "' + market_id_input + '", "quantity": ' + str.tostring(qty_correct) + ', "entry": ' + str.tostring(close) + ', "SL": ' + str.tostring(sl_ini) + ', "TP": ' + str.tostring(tp_fijo) + ', "action": "sell"}'
+        string alert_msg_sell = '{"strategy": "SniperMaster", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "' + forex_account + '", "ticker": "' + symbol_to_send + '", "market_id": "' + market_id_input + '", "quantity": ' + str.tostring(qty_correct, "#.##") + ', "entry": ' + str.tostring(close, "#.##") + ', "SL": ' + str.tostring(sl_ini, "#.##") + ', "TP": ' + str.tostring(tp_fijo, "#.##") + ', "action": "sell"}'
         strategy.entry("Short", strategy.short, qty = qty_correct, alert_message=use_pc ? alert_msg_sell : "")
     
 
@@ -240,7 +240,7 @@ if strategy.position_size != 0
         slDinamico := math.min(slDinamico, emaVal)
 
     string symbol_to_send = pc_symbol == "" ? syminfo.ticker : pc_symbol
-    string alert_msg_close = '{"strategy": "SniperMaster", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "' + forex_account + '", "ticker": "' + symbol_to_send + '", "market_id": "' + market_id_input + '", "quantity": ' + str.tostring(math.abs(strategy.position_size)) + ', "action": "close"}'
+    string alert_msg_close = '{"strategy": "SniperMaster", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "' + forex_account + '", "ticker": "' + symbol_to_send + '", "market_id": "' + market_id_input + '", "quantity": ' + str.tostring(math.abs(strategy.position_size), "#.##") + ', "action": "close"}'
     strategy.exit("Exit", stop = slDinamico, limit = tp_fijo, alert_message=use_pc ? alert_msg_close : "")
 
 if strategy.closedtrades > last_id

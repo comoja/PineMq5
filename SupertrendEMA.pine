@@ -6,7 +6,7 @@ var float riesgoPerc = 2.0
 var float minRR = 1.5
 
 // Parámetros de Indicadores
-var int emaFastPeriod = 9
+var int emaFastPeriod = 8
 var int emaSlowPeriod = 21
 var int atrPeriod = 18
 var float factor = 3.4
@@ -17,7 +17,7 @@ pcLicenseId = input.string("", "PineConnector License ID", group="PineConnector"
 var string pcSymbol = ""
 market_id_input = input.string("", "Market ID Opcional", group="PineConnector")
 webhook_token = input.string("", "Token Secreto Webhook", group="Seguridad Webhook")
-forex_account = input.string("", "Cuenta FOREX.com", group="Configuración de Cuenta") 
+forex_account = "ggAAAAABqjwPlVclysTTnuKpbpe2knYotiFexsL22ZnxIOpcwHIEfAgOqSSRn1241XZsAChVNOd7maFcmDFjo4mo-7BN0Th72ykDyEzSd3X-KHfD9q_LpUxtxtgjhR3OFvIfIuqON7xgq"
 
 // --- DETECCIÓN DE INSTRUMENTO Y MULTIPLICADORES (Adaptativo) ---
 
@@ -26,12 +26,14 @@ isGold   = str.contains(str.upper(syminfo.ticker), "XAU") or str.contains(str.up
 isCrypto = syminfo.type == "crypto"
 
 // Factores K (Optimizados por activo)
-minRR := isCrypto ? 1.5 : isSilver ? 1.5 : isGold ? 6.3 :1.5
+minRR := isCrypto ? 1.5 : isSilver ? 1.6 : isGold ? 6.3 :1.5
+atrDynamicTP = isSilver ? 0.9: 1.70
+
 atrPeriod := isCrypto ? 18 : isSilver ? 17 : isGold ? 17 : 18
-factor := isCrypto ? 3.4 : isSilver ? 2.3 : isGold ? 3.9 :3.4
-atrMult = isCrypto ? 2.5 : isSilver ? 0.7 : isGold ? 0.8 : 1.5
+factor := isCrypto ? 3.4 : isSilver ? 3.1 : isGold ? 3.9 :3.4
+atrMult = isCrypto ? 2.5 : isSilver ? 2.6 : isGold ? 0.8 : 1.5
 volMult = isCrypto ? 1.0 : isSilver ? 1.0 : isGold ? 1.1 : 1.1
-atrDynamicTP = isSilver ? 1.72 : 2.0
+
 
 // Restricción de Sesión NY
 nyTime = hour(time, "America/New_York") * 100 + minute(time, "America/New_York")
@@ -67,6 +69,7 @@ var float originalTp = na
 var float slIni = na
 var float currentRrMult = na
 var bool dynamicTpActivated = false
+var float atrAtActivation = na   // ATR congelado al momento de activación
 
 if strategy.position_size == 0
     if longCond and not inShort
@@ -80,7 +83,7 @@ if strategy.position_size == 0
         riesgoMonetario = strategy.equity * (riesgoPerc / 100)
         qtyCorrect = distanciaSl > 0 ? riesgoMonetario / distanciaSl : 0
         string symbol_to_send = pcSymbol == "" ? syminfo.ticker : pcSymbol
-        string alert_msg_buy = '{"strategy": "SupertrendEMA", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "' + forex_account + '", "ticker": "' + symbol_to_send + '", "market_id": "' + market_id_input + '", "quantity": ' + str.tostring(qtyCorrect) + ', "entry": ' + str.tostring(close) + ', "SL": ' + str.tostring(slIni) + ', "TP": ' + str.tostring(tpFijo) + ', "action": "buy"}'
+        string alert_msg_buy = '{"strategy": "SupertrendEMA", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "' + forex_account + '", "ticker": "' + symbol_to_send + '", "market_id": "' + market_id_input + '", "quantity": ' + str.tostring(qtyCorrect, "#.##") + ', "entry": ' + str.tostring(close, "#.##") + ', "SL": ' + str.tostring(slIni, "#.##") + ', "TP": ' + str.tostring(tpFijo, "#.##") + ', "action": "buy"}'
         strategy.entry("Buy", strategy.long, qty = qtyCorrect, alert_message = usePc ? alert_msg_buy : "")
         
     if shortCond and not inLong
@@ -94,11 +97,16 @@ if strategy.position_size == 0
         riesgoMonetario = strategy.equity * (riesgoPerc / 100)
         qtyCorrect = distanciaSl > 0 ? riesgoMonetario / distanciaSl : 0
         string symbol_to_send = pcSymbol == "" ? syminfo.ticker : pcSymbol
-        string alert_msg_sell = '{"strategy": "SupertrendEMA", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "' + forex_account + '", "ticker": "' + symbol_to_send + '", "market_id": "' + market_id_input + '", "quantity": ' + str.tostring(qtyCorrect) + ', "entry": ' + str.tostring(close) + ', "SL": ' + str.tostring(slIni) + ', "TP": ' + str.tostring(tpFijo) + ', "action": "sell"}'
+        string alert_msg_sell = '{"strategy": "SupertrendEMA", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "' + forex_account + '", "ticker": "' + symbol_to_send + '", "market_id": "' + market_id_input + '", "quantity": ' + str.tostring(qtyCorrect, "#.##") + ', "entry": ' + str.tostring(close, "#.##") + ', "SL": ' + str.tostring(slIni, "#.##") + ', "TP": ' + str.tostring(tpFijo, "#.##") + ', "action": "sell"}'
         strategy.entry("Sell", strategy.short, qty = qtyCorrect, alert_message = usePc ? alert_msg_sell : "")
 
 
 // --- GESTIÓN DINÁMICA (Visual y Salidas) ---
+// Regla: el TP solo se extiende hacia ganancia, NUNCA retrocede.
+//   LONG : tpPrice = math.max(...)  → solo sube | usa limit
+//   SHORT: tpPrice = math.min(...)  → solo baja | usa limit
+// El ATR queda congelado (atrAtActivation) en el momento de activación,
+// por lo que cambios de volatilidad no desplazan el TP.
 var float tpPrice = na
 var float slPrice = na
 
@@ -110,39 +118,49 @@ if strategy.position_size != 0
         float metaBe = entryPrice + ((originalTp - entryPrice) * 0.51)
         
         if not dynamicTpActivated
-            tpPrice := originalTp
+            tpPrice := originalTp          // TP fijo mientras no se active el dinámico
             
         if not dynamicTpActivated and high >= metaBe
             dynamicTpActivated := true
+            atrAtActivation    := atrVal   // Congela ATR en este momento
             
         if dynamicTpActivated
-            tpPrice := math.max(tpPrice, high + (atrVal * atrDynamicTP))
+            // LONG: TP solo sube si la barra cerró alcista (close >= open)
+            // Esto garantiza que la volatilidad va A FAVOR del trade.
+            // Una vela bajista (ATR hacia abajo) NO mueve el TP.
+            if barstate.isconfirmed and close >= open
+                tpPrice := high + (atrVal * atrDynamicTP)>tpPrice? high + (atrVal * atrDynamicTP):tpPrice
             
-        slPrice := superTrend //slIni 
+        slPrice := superTrend
         
-        string alert_msg_close_buy = '{"strategy": "SupertrendEMA", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "' + forex_account + '", "ticker": "' + symbol_to_send + '", "market_id": "' + market_id_input + '", "quantity": ' + str.tostring(math.abs(strategy.position_size)) + ', "action": "close"}'
+        string alert_msg_close_buy = '{"strategy": "SupertrendEMA", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "' + forex_account + '", "ticker": "' + symbol_to_send + '", "market_id": "' + market_id_input + '", "quantity": ' + str.tostring(math.abs(strategy.position_size), "#.##") + ', "action": "close"}'
         strategy.exit("Exit Buy", "Buy", stop=slPrice, limit=tpPrice, alert_message = usePc ? alert_msg_close_buy : "")
 
     if strategy.position_size < 0
         float metaBe = entryPrice - ((entryPrice - originalTp) * 0.51)
         
         if not dynamicTpActivated
-            tpPrice := originalTp
+            tpPrice := originalTp          // TP fijo mientras no se active el dinámico
             
         if not dynamicTpActivated and low <= metaBe
             dynamicTpActivated := true
+            atrAtActivation    := atrVal   // Congela ATR en este momento
             
         if dynamicTpActivated
-            tpPrice := math.min(tpPrice, low - (atrVal * atrDynamicTP))
-            
-        slPrice := superTrend //slIni
+            // SHORT: TP solo baja si la barra cerró bajista (close <= open)
+            // Esto garantiza que la volatilidad va A FAVOR del trade.
+            // Una vela alcista (ATR hacia arriba) NO mueve el TP.
+            if barstate.isconfirmed and close <= open
+                tpPrice :=  low - (atrVal * atrDynamicTP)< tpPrice? low - (atrVal * atrDynamicTP):tpPrice            
+        slPrice := superTrend
         
-        string alert_msg_close_sell = '{"strategy": "SupertrendEMA", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "' + forex_account + '", "ticker": "' + symbol_to_send + '", "market_id": "' + market_id_input + '", "quantity": ' + str.tostring(math.abs(strategy.position_size)) + ', "action": "close"}'
+        string alert_msg_close_sell = '{"strategy": "SupertrendEMA", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "' + forex_account + '", "ticker": "' + symbol_to_send + '", "market_id": "' + market_id_input + '", "quantity": ' + str.tostring(math.abs(strategy.position_size), "#.##") + ', "action": "close"}'
         strategy.exit("Exit Sell", "Sell", stop=slPrice, limit=tpPrice, alert_message = usePc ? alert_msg_close_sell : "")
 else
-    tpPrice := na
-    slPrice := na
+    tpPrice            := na
+    slPrice            := na
     dynamicTpActivated := false
+    atrAtActivation    := na
 
 
 // --- GRÁFICOS ---

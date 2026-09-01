@@ -238,12 +238,12 @@ salidaVenta = (emaR > emaL and emaR[1] <= emaL[1]) or (close > emaL)
 
 if strategy.position_size > 0 and salidaCompra
     string symbol_to_send_close = pcSymbol == "" ? syminfo.ticker : pcSymbol
-    string alert_msg_close = '{"strategy": "2EMAs", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "\' + forex_account + \'", "ticker": "' + symbol_to_send_close + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(math.abs(strategy.position_size)) + ', "action": "close"}'
+    string alert_msg_close = '{"strategy": "2EMAs", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "\' + forex_account + \'", "ticker": "' + symbol_to_send_close + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(math.abs(strategy.position_size), "#.##") + ', "action": "close"}'
     strategy.close("Buy", comment="Cierre Forzado", alert_message=usePc ? alert_msg_close : "")
     lastPositionExitPrice := close
 if strategy.position_size < 0 and salidaVenta
     string symbol_to_send_close = pcSymbol == "" ? syminfo.ticker : pcSymbol
-    string alert_msg_close = '{"strategy": "2EMAs", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "\' + forex_account + \'", "ticker": "' + symbol_to_send_close + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(math.abs(strategy.position_size)) + ', "action": "close"}'
+    string alert_msg_close = '{"strategy": "2EMAs", "passphrase": "' + webhook_token + '", "FOREX_USERNAME": "\' + forex_account + \'", "ticker": "' + symbol_to_send_close + '", "market_id": "' + marketIdInput + '", "quantity": ' + str.tostring(math.abs(strategy.position_size), "#.##") + ', "action": "close"}'
     strategy.close("Sell", comment="Cierre Forzado", alert_message=usePc ? alert_msg_close : "")
     lastPositionExitPrice := close
 
@@ -408,8 +408,9 @@ if strategy.position_size != 0
         if not dynamicTpActivated and high >= metaBe
             dynamicTpActivated := true
             
-        if dynamicTpActivated          
-            tpPrice := math.max(tpPrice, high + (atrVal * atrDynamicTP))
+        if dynamicTpActivated
+            if barstate.isconfirmed
+                tpPrice := math.max(tpPrice, high + (atrVal * atrDynamicTP))
             //slPrice := math.min(emaL,math.max(slPrice, high - slDistancia))
             
         
@@ -437,8 +438,9 @@ if strategy.position_size != 0
         if not dynamicTpActivated and low <= metaBe
             dynamicTpActivated := true
             
-        if dynamicTpActivated        
-            tpPrice := math.min(tpPrice, low - (atrVal * atrDynamicTP)) 
+        if dynamicTpActivated
+            if barstate.isconfirmed
+                tpPrice := math.min(tpPrice, low - (atrVal * atrDynamicTP)) 
             //slPrice := math.min(slPrice, low + slDistancia)
                   
         
