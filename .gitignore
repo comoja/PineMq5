@@ -7,3 +7,9 @@
 
 # TradingView backups
 *.bak
+
+# Logs (no deben incluirse en github)
+*.log
+*.log.*
+logs/
+**/logs/

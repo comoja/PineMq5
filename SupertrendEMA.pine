@@ -1,5 +1,5 @@
 //@version=6
-strategy('Supertrend EMA', overlay = true, initial_capital = 500, margin_long = 1, margin_short = 1, calc_on_every_tick=true, max_boxes_count = 500, max_labels_count = 500, max_lines_count = 500)
+strategy('Supertrend EMA', overlay = true, initial_capital = 500, margin_long = 1, margin_short = 1, calc_on_every_tick=false, max_boxes_count = 500, max_labels_count = 500, max_lines_count = 500)
 
 // --- PARÁMETROS E INTERRUPTORES ---
 var float riesgoPerc = 2.0
@@ -26,11 +26,11 @@ isGold   = str.contains(str.upper(syminfo.ticker), "XAU") or str.contains(str.up
 isCrypto = syminfo.type == "crypto"
 
 // Factores K (Optimizados por activo)
-minRR := isCrypto ? 1.5 : isSilver ? 1.6 : isGold ? 6.3 :1.5
-atrDynamicTP = isSilver ? 0.9: 1.70
+minRR := isCrypto ? 1.5 : isSilver ? 1.4 : isGold ? 6.3 :1.5
+atrDynamicTP = isSilver ? 0.8: 1.70
 
 atrPeriod := isCrypto ? 18 : isSilver ? 17 : isGold ? 17 : 18
-factor := isCrypto ? 3.4 : isSilver ? 3.1 : isGold ? 3.9 :3.4
+factor := isCrypto ? 3.4 : isSilver ? 3.2 : isGold ? 3.9 :3.4
 atrMult = isCrypto ? 2.5 : isSilver ? 2.6 : isGold ? 0.8 : 1.5
 volMult = isCrypto ? 1.0 : isSilver ? 1.0 : isGold ? 1.1 : 1.1
 
@@ -65,18 +65,23 @@ shortCond = cruceBajista and isSupertrendBearish and enSesion and volAlto
 inLong = strategy.position_size > 0
 inShort = strategy.position_size < 0
 
+// Control anti-duplicados: solo dispara UNA señal por dirección
+var int lastTradeBar = -1
+nuevaEntrada = barstate.isconfirmed and bar_index != lastTradeBar
+
 var float originalTp = na
 var float slIni = na
 var float currentRrMult = na
 var bool dynamicTpActivated = false
 var float atrAtActivation = na   // ATR congelado al momento de activación
 
-if strategy.position_size == 0
+if strategy.position_size == 0 and nuevaEntrada
     if longCond and not inShort
         slIni := close - (atrVal * atrMult)
         float tpFijo = close + (close - slIni) * minRR
         originalTp := tpFijo
         currentRrMult := minRR * atrMult 
+        lastTradeBar := bar_index  // Marcar barra para evitar duplicados
         
         // Position Sizing basado en Riesgo Fijo
         distanciaSl = math.abs(close - slIni)
@@ -91,6 +96,7 @@ if strategy.position_size == 0
         float tpFijo = close - (slIni - close) * minRR
         originalTp := tpFijo
         currentRrMult := minRR * atrMult
+        lastTradeBar := bar_index  // Marcar barra para evitar duplicados
         
         // Position Sizing basado en Riesgo Fijo
         distanciaSl = math.abs(slIni - close)

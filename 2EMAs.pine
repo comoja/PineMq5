@@ -1,5 +1,5 @@
 //@version=6
-strategy("2EMAs", overlay=true, initial_capital=400, margin_long=1, margin_short=1, calc_on_every_tick=true, max_boxes_count=500, max_lines_count=500, max_labels_count=500)
+strategy("2EMAs", overlay=true, initial_capital=400, margin_long=1, margin_short=1, calc_on_every_tick=false, max_boxes_count=500, max_lines_count=500, max_labels_count=500)
 
 //====================================================================
 // PARÁMETROS DE PINECONNECTOR
@@ -321,8 +321,8 @@ if strategy.position_size == 0 and currentTrend != 0 and not isLateral and filtr
                 beActivated := false
                 dynamicTpActivated := false
                 yaEntroEnEsteCruce := true
+                strategy.exit("Exit Buy", "Buy", stop=slPrice, limit=tpPrice, alert_message=usePc ? cached_alert_msg_close_buy : "")
                 
-            strategy.exit("Exit Buy", "Buy", stop=slPrice, limit=tpPrice, alert_message=usePc ? cached_alert_msg_close_buy : "")
 
     // --- SEÑAL BAJISTA ---
     if currentTrend == -1 and pendienteRapida < -pendienteMin 
@@ -374,8 +374,8 @@ if strategy.position_size == 0 and currentTrend != 0 and not isLateral and filtr
                 beActivated := false
                 dynamicTpActivated := false
                 yaEntroEnEsteCruce := true
-                
-            strategy.exit("Exit Sell", "Sell", stop=slPrice, limit=tpPrice, alert_message=usePc ? cached_alert_msg_close_sell : "")
+                strategy.exit("Exit Sell", "Sell", stop=slPrice, limit=tpPrice, alert_message=usePc ? cached_alert_msg_close_sell : "")
+    
     
     
     //string debugTxt = "Vela: " + (velaPrevia ? "Roja " : "Verde "+ str.tostring(pendienteRapida, "#.##") )
