@@ -65,9 +65,9 @@ shortCond = cruceBajista and isSupertrendBearish and enSesion and volAlto
 inLong = strategy.position_size > 0
 inShort = strategy.position_size < 0
 
-// Control anti-duplicados: solo dispara UNA señal por dirección
+// Control anti-duplicados: solo dispara UNA señal por dirección y solo si no hay posición abierta
 var int lastTradeBar = -1
-nuevaEntrada = barstate.isconfirmed and bar_index != lastTradeBar
+nuevaEntrada = barstate.isconfirmed and bar_index != lastTradeBar and strategy.position_size == 0
 
 var float originalTp = na
 var float slIni = na
@@ -75,7 +75,7 @@ var float currentRrMult = na
 var bool dynamicTpActivated = false
 var float atrAtActivation = na   // ATR congelado al momento de activación
 
-if strategy.position_size == 0 and nuevaEntrada
+if nuevaEntrada
     if longCond and not inShort
         slIni := close - (atrVal * atrMult)
         float tpFijo = close + (close - slIni) * minRR
